@@ -24,6 +24,7 @@
 
 #if HAL_WITH_UAVCAN
 #include <AP_UAVCAN/AP_UAVCAN.h>
+#include <AP_KDECAN/AP_KDECAN.h>
 #include <AP_BoardConfig/AP_BoardConfig_CAN.h>
 #endif
 
@@ -232,14 +233,30 @@ void SRV_Channels::push()
 #endif
 
 #if HAL_WITH_UAVCAN
-    // push outputs to UAVCAN
+    // push outputs to CAN
     uint8_t can_num_drivers = AP::can().get_num_drivers();
     for (uint8_t i = 0; i < can_num_drivers; i++) {
-        AP_UAVCAN *ap_uavcan = AP_UAVCAN::get_uavcan(i);
-        if (ap_uavcan == nullptr) {
-            continue;
+        switch (AP::can().get_protocol_type(i)) {
+            case AP_BoardConfig_CAN::Protocol_Type_UAVCAN: {
+                AP_UAVCAN *ap_uavcan = AP_UAVCAN::get_uavcan(i);
+                if (ap_uavcan == nullptr) {
+                    continue;
+                }
+                ap_uavcan->SRV_push_servos();
+                break;
+            }
+            case AP_BoardConfig_CAN::Protocol_Type_KDECAN: {
+                AP_KDECAN *ap_kdecan = AP_KDECAN::get_kdecan(i);
+                if (ap_kdecan == nullptr) {
+                    continue;
+                }
+                ap_kdecan->update();
+                break;
+            }
+            case AP_BoardConfig_CAN::Protocol_Type_None:
+            default:
+                break;
         }
-        ap_uavcan->SRV_push_servos();
     }
 #endif // HAL_WITH_UAVCAN
 }

@@ -14,9 +14,15 @@
  */
 
 #include "AP_Arming.h"
+#include <AP_HAL/AP_HAL.h>
 #include <AP_Notify/AP_Notify.h>
 #include <SRV_Channel/SRV_Channel.h>
 #include <GCS_MAVLink/GCS.h>
+
+#ifdef HAL_WITH_UAVCAN
+#include <AP_BoardConfig/AP_BoardConfig_CAN.h>
+#include <AP_KDECAN/AP_KDECAN.h>
+#endif
 
 #define AP_ARMING_COMPASS_MAGFIELD_EXPECTED 530
 #define AP_ARMING_COMPASS_MAGFIELD_MIN  185     // 0.35 * 530 milligauss
@@ -551,6 +557,39 @@ bool AP_Arming::system_checks(bool report)
     return true;
 }
 
+bool AP_Arming::can_checks(bool report)
+{
+#ifdef HAL_WITH_UAVCAN
+    if (check_enabled(ARMING_CHECK_SYSTEM)) {
+        const char *fail_msg = nullptr;
+        uint8_t num_drivers = AP::can().get_num_drivers();
+
+        for (uint8_t i = 0; i < num_drivers; i++) {
+            switch (AP::can().get_protocol_type(i)) {
+                case AP_BoardConfig_CAN::Protocol_Type_KDECAN: {
+                    AP_KDECAN *ap_kdecan = AP_KDECAN::get_kdecan(i);
+                    if (ap_kdecan != nullptr && !ap_kdecan->pre_arm_check(fail_msg)) {
+                        if (fail_msg == nullptr) {
+                            check_failed(ARMING_CHECK_SYSTEM, report, "KDECAN failed");
+                        } else {
+                            check_failed(ARMING_CHECK_SYSTEM, report, "%s", fail_msg);
+                        }
+
+                        return false;
+                    }
+                    break;
+                }
+                case AP_BoardConfig_CAN::Protocol_Type_UAVCAN:
+                case AP_BoardConfig_CAN::Protocol_Type_None:
+                default:
+                    break;
+            }
+        }
+    }
+#endif
+    return true;
+}
+
 bool AP_Arming::pre_arm_checks(bool report)
 {
 #if !APM_BUILD_TYPE(APM_BUILD_ArduCopter)
@@ -571,7 +610,8 @@ bool AP_Arming::pre_arm_checks(bool report)
         &  manual_transmitter_checks(report)
         &  servo_checks(report)
         &  board_voltage_checks(report)
-        &  system_checks(report);
+        &  system_checks(report)
+        &  can_checks(report);
 }
 
 bool AP_Arming::arm_checks(ArmingMethod method)

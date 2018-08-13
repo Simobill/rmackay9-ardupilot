@@ -3316,6 +3316,25 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
             blheli->send_esc_telemetry_mavlink(uint8_t(chan));
         }
 #endif
+#ifdef HAL_WITH_UAVCAN
+        uint8_t num_drivers = AP::can().get_num_drivers();
+
+        for (uint8_t i = 0; i < num_drivers; i++) {
+            switch (AP::can().get_protocol_type(i)) {
+                case AP_BoardConfig_CAN::Protocol_Type_KDECAN: {
+                    AP_KDECAN *ap_kdecan = AP_KDECAN::get_kdecan(i);
+                    if (ap_kdecan != nullptr) {
+                        ap_kdecan->send_mavlink(uint8_t(chan));
+                    }
+                    break;
+                }
+                case AP_BoardConfig_CAN::Protocol_Type_UAVCAN:
+                case AP_BoardConfig_CAN::Protocol_Type_None:
+                default:
+                    break;
+            }
+        }
+#endif
         break;
     }
 

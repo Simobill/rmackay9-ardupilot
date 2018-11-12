@@ -29,7 +29,7 @@ class AP_ToshibaCAN : public AP_HAL::CANProtocol {
 public:
     AP_ToshibaCAN();
     ~AP_ToshibaCAN();
-    
+
     /* Do not allow copies */
     AP_ToshibaCAN(const AP_ToshibaCAN &other) = delete;
     AP_ToshibaCAN &operator=(const AP_ToshibaCAN&) = delete;
@@ -43,7 +43,7 @@ public:
 
     // called from SRV_Channels
     void update();
-    
+
     // check that arming can happen
     bool pre_arm_check(const char* &reason) const;
 
@@ -93,7 +93,6 @@ private:
         bool new_data;
     } _telemetry[TOSHIBACAN_MAX_NUM_ESCS];
 
-
     union frame_id_t {
         struct {
             uint8_t object_address;
@@ -104,7 +103,7 @@ private:
         };
         uint32_t value;
     };
-    
+
     static const uint8_t AUTOPILOT_NODE_ID = 0;
     static const uint8_t BROADCAST_NODE_ID = 1;
     static const uint8_t ESC_NODE_ID_FIRST = 2;

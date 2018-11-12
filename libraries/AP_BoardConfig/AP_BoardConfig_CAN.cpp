@@ -37,6 +37,7 @@
 
 #include <AP_UAVCAN/AP_UAVCAN.h>
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_ToshibaCAN/AP_ToshibaCAN.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -155,6 +156,15 @@ void AP_BoardConfig_CAN::init()
                 }
 
                 AP_Param::load_object_from_eeprom(_drivers[i]._kdecan, AP_KDECAN::var_info);
+            } else if (prot_type == Protocol_Type_ToshibaCAN) {
+                _drivers[i]._driver = _drivers[i]._tcan = new AP_ToshibaCAN;
+
+                 if (_drivers[i]._driver == nullptr) {
+                    AP_HAL::panic("Failed to allocate ToshibaCAN %d\n\r", i + 1);
+                    continue;
+                }
+
+                AP_Param::load_object_from_eeprom(_drivers[i]._tcan, AP_ToshibaCAN::var_info);
             } else {
                 continue;
             }

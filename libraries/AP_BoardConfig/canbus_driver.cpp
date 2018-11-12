@@ -19,13 +19,14 @@
 #include "AP_BoardConfig_CAN.h"
 #include <AP_UAVCAN/AP_UAVCAN.h>
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_ToshibaCAN/AP_ToshibaCAN.h>
 
 // table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_BoardConfig_CAN::Driver::var_info[] = {
     // @Param: PROTOCOL
     // @DisplayName: Enable use of specific protocol over virtual driver
     // @Description: Enabling this option starts selected protocol that will use this virtual driver
-    // @Values: 0:Disabled,1:UAVCAN,2:KDECAN
+    // @Values: 0:Disabled,1:UAVCAN,2:KDECAN,3:ToshibaCAN
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("PROTOCOL", 1, AP_BoardConfig_CAN::Driver, _protocol_type, AP_BoardConfig_CAN::Protocol_Type_UAVCAN),
@@ -37,6 +38,10 @@ const AP_Param::GroupInfo AP_BoardConfig_CAN::Driver::var_info[] = {
     // @Group: KDE_
     // @Path: ../AP_KDECAN/AP_KDECAN.cpp
     AP_SUBGROUPPTR(_kdecan, "KDE_", 3, AP_BoardConfig_CAN::Driver, AP_KDECAN),
+
+    // @Group: TC_
+    // @Path: ../AP_KDECAN/AP_ToshibaCAN.cpp
+    AP_SUBGROUPPTR(_tcan, "TC_", 4, AP_BoardConfig_CAN::Driver, AP_ToshibaCAN),
 
     AP_GROUPEND
 };

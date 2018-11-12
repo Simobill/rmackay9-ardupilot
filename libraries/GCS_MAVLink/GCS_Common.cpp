@@ -2698,6 +2698,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_preflight_can(const mavlink_command_long_
                 }
                 break;
             }
+            case AP_BoardConfig_CAN::Protocol_Type_ToshibaCAN:
             case AP_BoardConfig_CAN::Protocol_Type_UAVCAN:
             case AP_BoardConfig_CAN::Protocol_Type_None:
             default:
@@ -3328,6 +3329,7 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
                     }
                     break;
                 }
+                case AP_BoardConfig_CAN::Protocol_Type_ToshibaCAN:
                 case AP_BoardConfig_CAN::Protocol_Type_UAVCAN:
                 case AP_BoardConfig_CAN::Protocol_Type_None:
                 default:

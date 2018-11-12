@@ -672,6 +672,7 @@ bool AP_Arming::can_checks(bool report)
                     UNUSED_RESULT(fail_msg); // prevent unused variable error
 #endif
                 }
+                case AP_BoardConfig_CAN::Protocol_Type_ToshibaCAN:
                 case AP_BoardConfig_CAN::Protocol_Type_UAVCAN:
                 case AP_BoardConfig_CAN::Protocol_Type_None:
                 default:

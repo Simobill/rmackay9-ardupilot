@@ -25,6 +25,7 @@
 #if HAL_WITH_UAVCAN
 #include <AP_UAVCAN/AP_UAVCAN.h>
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_ToshibaCAN/AP_ToshibaCAN.h>
 #include <AP_BoardConfig/AP_BoardConfig_CAN.h>
 #endif
 
@@ -251,6 +252,14 @@ void SRV_Channels::push()
                     continue;
                 }
                 ap_kdecan->update();
+                break;
+            }
+            case AP_BoardConfig_CAN::Protocol_Type_ToshibaCAN: {
+                AP_ToshibaCAN *ap_tcan = AP_ToshibaCAN::get_tcan(i);
+                if (ap_tcan == nullptr) {
+                    continue;
+                }
+                ap_tcan->update();
                 break;
             }
             case AP_BoardConfig_CAN::Protocol_Type_None:

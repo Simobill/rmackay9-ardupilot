@@ -579,6 +579,7 @@ bool AP_Arming::can_checks(bool report)
                     }
                     break;
                 }
+                case AP_BoardConfig_CAN::Protocol_Type_ToshibaCAN:
                 case AP_BoardConfig_CAN::Protocol_Type_UAVCAN:
                 case AP_BoardConfig_CAN::Protocol_Type_None:
                 default:

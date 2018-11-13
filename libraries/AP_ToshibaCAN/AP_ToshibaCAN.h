@@ -39,22 +39,15 @@ public:
     // Return ToshibaCAN from @driver_index or nullptr if it's not ready or doesn't exist
     static AP_ToshibaCAN *get_tcan(uint8_t driver_index);
 
+    // initialise ToshibaCAN bus
     void init(uint8_t driver_index) override;
 
     // called from SRV_Channels
     void update();
 
-    // check that arming can happen
-    bool pre_arm_check(const char* &reason) const;
-
-    // send MAVLink telemetry packets
-    void send_mavlink(uint8_t chan) const;
-
-    // caller checks that vehicle isn't armed
-    // start_stop: true to start, false to stop
-    bool run_enumeration(bool start_stop);
-
 private:
+
+    // loop to send output to ESCs in background thread
     void loop();
 
     bool _initialized;
@@ -65,33 +58,13 @@ private:
     AP_Int8 _num_poles;
 
     // ESC detected information
-    uint16_t _esc_present_bitmask;
+    uint16_t _esc_present_bitmask = 0x15;
     uint8_t _esc_max_node_id;
-
-    // enumeration
-    AP_HAL::Semaphore *_enum_sem;
-    enum enumeration_state_t : uint8_t {
-        ENUMERATION_STOPPED,
-        ENUMERATION_START,
-        ENUMERATION_STOP,
-        ENUMERATION_RUNNING
-    } _enumeration_state = ENUMERATION_STOPPED;
 
     // PWM output
     AP_HAL::Semaphore *_rc_out_sem;
     std::atomic<bool> _new_output;
     uint16_t _scaled_output[TOSHIBACAN_MAX_NUM_ESCS];
-
-    // telemetry input
-    AP_HAL::Semaphore *_telem_sem;
-    struct telemetry_info_t {
-        uint64_t time;
-        uint16_t voltage;
-        uint16_t current;
-        uint16_t rpm;
-        uint8_t temp;
-        bool new_data;
-    } _telemetry[TOSHIBACAN_MAX_NUM_ESCS];
 
     union frame_id_t {
         struct {

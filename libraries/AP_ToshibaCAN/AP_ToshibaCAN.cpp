@@ -53,23 +53,17 @@ const AP_Param::GroupInfo AP_ToshibaCAN::var_info[] = {
     AP_GROUPEND
 };
 
-
 AP_ToshibaCAN::AP_ToshibaCAN()
 {
     AP_Param::setup_object_defaults(this, var_info);
 
-    _rc_out_sem = hal.util->new_semaphore();
-    _telem_sem = hal.util->new_semaphore();
-    _enum_sem = hal.util->new_semaphore();
-
+    //_rc_out_sem = hal.util->new_semaphore();
     debug_can(2, "ToshibaCAN: constructed\n\r");
 }
 
 AP_ToshibaCAN::~AP_ToshibaCAN()
 {
     delete _rc_out_sem;
-    delete _telem_sem;
-    delete _enum_sem;
 }
 
 AP_ToshibaCAN *AP_ToshibaCAN::get_tcan(uint8_t driver_index)
@@ -81,6 +75,7 @@ AP_ToshibaCAN *AP_ToshibaCAN::get_tcan(uint8_t driver_index)
     return static_cast<AP_ToshibaCAN*>(AP::can().get_driver(driver_index));
 }
 
+// initialise ToshibaCAN bus
 void AP_ToshibaCAN::init(uint8_t driver_index)
 {
     _driver_index = driver_index;
@@ -111,61 +106,7 @@ void AP_ToshibaCAN::init(uint8_t driver_index)
         return;
     }
 
-    // find available ESCs
-    frame_id_t id = { { .object_address = ESC_INFO_OBJ_ADDR,
-                      .destination_id = BROADCAST_NODE_ID,
-                      .source_id = AUTOPILOT_NODE_ID,
-                      .priority = 0,
-                      .unused = 0 } };
-
-    uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), nullptr, 0 };
-
-    if(!_can_driver->getIface(CAN_IFACE_INDEX)->send(frame, uavcan::MonotonicTime::fromMSec(AP_HAL::millis() + 1000), 0)) {
-        debug_can(1, "ToshibaCAN: couldn't send discovery message\n\r");
-        return;
-    }
-
-    debug_can(2, "ToshibaCAN: discovery message sent\n\r");
-
-    uint32_t start = AP_HAL::millis();
-
-    while (AP_HAL::millis() - start < 1000) {
-        uavcan::CanFrame esc_id_frame {};
-        uavcan::MonotonicTime time {};
-        uavcan::UtcTime utc_time {};
-        uavcan::CanIOFlags flags {};
-
-        int16_t n = _can_driver->getIface(CAN_IFACE_INDEX)->receive(esc_id_frame, time, utc_time, flags);
-
-        if (n != 1) {
-            continue;
-        }
-
-        if (!esc_id_frame.isExtended()) {
-            continue;
-        }
-
-        if (esc_id_frame.dlc != 5) {
-            continue;
-        }
-
-        id.value = esc_id_frame.id & uavcan::CanFrame::MaskExtID;
-
-        if (id.source_id == BROADCAST_NODE_ID ||
-            id.source_id >= (TOSHIBACAN_MAX_NUM_ESCS + ESC_NODE_ID_FIRST) ||
-            id.destination_id != AUTOPILOT_NODE_ID ||
-            id.object_address != ESC_INFO_OBJ_ADDR) {
-            continue;
-        }
-
-        _esc_present_bitmask |= (1 << (id.source_id - ESC_NODE_ID_FIRST));
-        _esc_max_node_id = id.source_id - ESC_NODE_ID_FIRST + 1;
-
-        debug_can(2, "ToshibaCAN: found ESC id %u\n\r", id.source_id);
-    }
-
-    snprintf(_thread_name, sizeof(_thread_name), "kdecan_%u", driver_index);
-
+    // start calls to loop in separate thread
     if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_ToshibaCAN::loop, void), _thread_name, 4096, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
         debug_can(1, "ToshibaCAN: couldn't create thread\n\r");
         return;
@@ -178,6 +119,7 @@ void AP_ToshibaCAN::init(uint8_t driver_index)
     return;
 }
 
+// loop to send output to ESCs in background thread
 void AP_ToshibaCAN::loop()
 {
     uavcan::MonotonicTime timeout;
@@ -187,209 +129,15 @@ void AP_ToshibaCAN::loop()
 
     uint16_t output_buffer[TOSHIBACAN_MAX_NUM_ESCS] {};
 
-    enumeration_state_t enumeration_state = _enumeration_state;
-    uint64_t enumeration_start = 0;
-    uint8_t enumeration_esc_num = 0;
-
     const uint32_t LOOP_INTERVAL_US = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
     uint64_t pwm_last_sent = 0;
     uint8_t sending_esc_num = 0;
 
-    uint64_t telemetry_last_request = 0;
-
     while (true) {
         if (!_initialized) {
+            // if not initialised wait 2ms
             debug_can(2, "ToshibaCAN: not initialized\n\r");
             hal.scheduler->delay_microseconds(2000);
-            continue;
-        }
-
-        uavcan::CanSelectMasks inout_mask;
-        uint64_t now = AP_HAL::micros64();
-
-        if (_enum_sem->take(1)) {
-            enumeration_state = _enumeration_state;
-            _enum_sem->give();
-        } else {
-            debug_can(2, "ToshibaCAN: failed to get enumeration semaphore on loop\n\r");
-        }
-
-        if (enumeration_state != ENUMERATION_STOPPED) {
-            if (enumeration_start != 0 && now - enumeration_start >= ENUMERATION_TIMEOUT_MS * 1000) {
-                enumeration_start = 0;
-
-                _enum_sem->take_blocking();
-
-                if (enumeration_state == _enumeration_state || _enumeration_state == ENUMERATION_STOP) {
-                    enumeration_state = _enumeration_state = ENUMERATION_STOPPED;
-                }
-
-                _enum_sem->give();
-                continue;
-            }
-
-            timeout = uavcan::MonotonicTime::fromUSec(now + 1000);
-
-            switch (enumeration_state) {
-                case ENUMERATION_START: {
-                    inout_mask.write = 1 << CAN_IFACE_INDEX;
-
-                    frame_id_t id = { { .object_address = ENUM_OBJ_ADDR,
-                                      .destination_id = BROADCAST_NODE_ID,
-                                      .source_id = AUTOPILOT_NODE_ID,
-                                      .priority = 0,
-                                      .unused = 0 } };
-                    be16_t data = htobe16((uint16_t) ENUMERATION_TIMEOUT_MS);
-                    uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &data, sizeof(data) };
-
-                    uavcan::CanSelectMasks in_mask = inout_mask;
-                    select_frames[CAN_IFACE_INDEX] = &frame;
-
-                    _can_driver->select(inout_mask, select_frames, timeout);
-                    select_frames[CAN_IFACE_INDEX] = &empty_frame;
-
-                    if (in_mask.write & inout_mask.write) {
-                        now = AP_HAL::micros64();
-                        timeout = uavcan::MonotonicTime::fromUSec(now + ENUMERATION_TIMEOUT_MS * 1000);
-
-                        int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(frame, timeout, 0);
-
-                        if (res == 1) {
-                            enumeration_start = now;
-                            enumeration_esc_num = 0;
-                            _esc_present_bitmask = 0;
-                            _esc_max_node_id = 0;
-
-                            _enum_sem->take_blocking();
-
-                            if (enumeration_state == _enumeration_state) {
-                                enumeration_state = _enumeration_state = ENUMERATION_RUNNING;
-                            }
-
-                            _enum_sem->give();
-                        } else if (res == 0) {
-                            debug_can(1, "ToshibaCAN:CAN: strange buffer full when starting ESC enumeration\n\r");
-                            break;
-                        } else {
-                            debug_can(1, "ToshibaCAN: error sending message to start ESC enumeration, result %d\n\r", res);
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                    FALLTHROUGH;
-                }
-                case ENUMERATION_RUNNING: {
-                    inout_mask.read = 1 << CAN_IFACE_INDEX;
-
-                    uavcan::CanSelectMasks in_mask = inout_mask;
-                    _can_driver->select(inout_mask, select_frames, timeout);
-
-                    if (in_mask.read & inout_mask.read) {
-                        uavcan::CanFrame recv_frame;
-                        uavcan::MonotonicTime time;
-                        uavcan::UtcTime utc_time;
-                        uavcan::CanIOFlags flags {};
-
-                        int16_t res = _can_driver->getIface(CAN_IFACE_INDEX)->receive(recv_frame, time, utc_time, flags);
-
-                        if (res == 1) {
-                            if (time.toUSec() < enumeration_start) {
-                                break;
-                            }
-
-                            frame_id_t id { .value = recv_frame.id & uavcan::CanFrame::MaskExtID };
-
-                            if (id.object_address == UPDATE_NODE_ID_OBJ_ADDR) {
-                                _esc_present_bitmask |= 1 << (id.source_id - ESC_NODE_ID_FIRST);
-                                _esc_max_node_id = MAX(_esc_max_node_id, id.source_id - ESC_NODE_ID_FIRST + 1);
-                                break;
-                            } else if (id.object_address != ENUM_OBJ_ADDR) {
-                                break;
-                            }
-
-                            while (AP_HAL::micros64() - enumeration_start < ENUMERATION_TIMEOUT_MS * 1000) {
-                                inout_mask.read = 0;
-                                inout_mask.write = 1 << CAN_IFACE_INDEX;
-
-                                in_mask = inout_mask;
-                                _can_driver->select(inout_mask, select_frames, timeout);
-
-                                if (in_mask.write & inout_mask.write) {
-                                    id = { { .object_address = UPDATE_NODE_ID_OBJ_ADDR,
-                                             .destination_id = uint8_t(enumeration_esc_num + ESC_NODE_ID_FIRST),
-                                             .source_id = AUTOPILOT_NODE_ID,
-                                             .priority = 0,
-                                             .unused = 0 } };
-                                    uavcan::CanFrame send_frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &recv_frame.data, recv_frame.dlc };
-                                    timeout = uavcan::MonotonicTime::fromUSec(enumeration_start + ENUMERATION_TIMEOUT_MS * 1000);
-
-                                    res = _can_driver->getIface(CAN_IFACE_INDEX)->send(send_frame, timeout, 0);
-
-                                    if (res == 1) {
-                                        enumeration_esc_num++;
-                                        break;
-                                    } else if (res == 0) {
-                                        debug_can(1, "ToshibaCAN: strange buffer full when setting ESC node ID\n\r");
-                                    } else {
-                                        debug_can(1, "ToshibaCAN: error sending message to set ESC node ID, result %d\n\r", res);
-                                    }
-                                }
-                            }
-                        } else if (res == 0) {
-                            debug_can(1, "ToshibaCAN: strange failed read when getting ESC enumeration message\n\r");
-                        } else {
-                            debug_can(1, "ToshibaCAN: error receiving ESC enumeration message, result %d\n\r", res);
-                        }
-                    }
-                    break;
-                }
-                case ENUMERATION_STOP: {
-                    inout_mask.write = 1 << CAN_IFACE_INDEX;
-
-                    frame_id_t id = { { .object_address = ENUM_OBJ_ADDR,
-                                      .destination_id = BROADCAST_NODE_ID,
-                                      .source_id = AUTOPILOT_NODE_ID,
-                                      .priority = 0,
-                                      .unused = 0 } };
-                    le16_t data = htole16((uint16_t) ENUMERATION_TIMEOUT_MS);
-                    uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &data, sizeof(data) };
-
-                    uavcan::CanSelectMasks in_mask = inout_mask;
-                    select_frames[CAN_IFACE_INDEX] = &frame;
-
-                    _can_driver->select(inout_mask, select_frames, timeout);
-                    select_frames[CAN_IFACE_INDEX] = &empty_frame;
-
-                    if (in_mask.write & inout_mask.write) {
-                        timeout = uavcan::MonotonicTime::fromUSec(enumeration_start + ENUMERATION_TIMEOUT_MS * 1000);
-
-                        int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(frame, timeout, 0);
-
-                        if (res == 1) {
-                            enumeration_start = 0;
-
-                            _enum_sem->take_blocking();
-
-                            if (enumeration_state == _enumeration_state) {
-                                enumeration_state = _enumeration_state = ENUMERATION_STOPPED;
-                            }
-
-                            _enum_sem->give();
-                        } else if (res == 0) {
-                            debug_can(1, "ToshibaCAN: strange buffer full when stop ESC enumeration\n\r");
-                        } else {
-                            debug_can(1, "ToshibaCAN: error sending message to stop ESC enumeration, result %d\n\r", res);
-                        }
-                    }
-                    break;
-                }
-                case ENUMERATION_STOPPED:
-                default:
-                    debug_can(2, "ToshibaCAN: something wrong happened, shouldn't be here, enumeration state: %u\n\r", enumeration_state);
-                    break;
-            }
-
             continue;
         }
 
@@ -399,13 +147,14 @@ void AP_ToshibaCAN::loop()
             continue;
         }
 
+        uint64_t now = AP_HAL::micros64();
+        uavcan::CanSelectMasks inout_mask;
         inout_mask.read = 1 << CAN_IFACE_INDEX;
         timeout = uavcan::MonotonicTime::fromUSec(now + LOOP_INTERVAL_US);
 
-        if (sending_esc_num > 0 ||
-            (_new_output.load(std::memory_order_acquire) && (pwm_last_sent == 0 || now - pwm_last_sent > SET_PWM_TIMEOUT_US)) ||
-            (pwm_last_sent != 0 && (now - pwm_last_sent > SET_PWM_MIN_INTERVAL_US)) ||
-            (now - telemetry_last_request > TELEMETRY_INTERVAL_US)) {
+        if ((sending_esc_num > 0) ||
+            (_new_output.load(std::memory_order_acquire) && ((pwm_last_sent == 0) || (now - pwm_last_sent > SET_PWM_TIMEOUT_US))) ||
+            ((pwm_last_sent != 0) && (now - pwm_last_sent > SET_PWM_MIN_INTERVAL_US))) {
 
             inout_mask.write = 1 << CAN_IFACE_INDEX;
         } else {
@@ -421,74 +170,31 @@ void AP_ToshibaCAN::loop()
         uavcan::CanSelectMasks in_mask = inout_mask;
         _can_driver->select(inout_mask, select_frames, timeout);
 
-        if (in_mask.read & inout_mask.read) {
-            uavcan::CanFrame frame;
-            uavcan::MonotonicTime time;
-            uavcan::UtcTime utc_time;
-            uavcan::CanIOFlags flags {};
-
-            int16_t res = _can_driver->getIface(CAN_IFACE_INDEX)->receive(frame, time, utc_time, flags);
-
-            if (res == 1) {
-                frame_id_t id { .value = frame.id & uavcan::CanFrame::MaskExtID };
-
-                if (id.destination_id == AUTOPILOT_NODE_ID &&
-                    id.source_id != BROADCAST_NODE_ID &&
-                    (1 << (id.source_id - ESC_NODE_ID_FIRST) & _esc_present_bitmask)) {
-                    switch (id.object_address) {
-                        case TELEMETRY_OBJ_ADDR: {
-                            if (frame.dlc != 8) {
-                                break;
-                            }
-
-                            if (!_telem_sem->take(1)) {
-                                debug_can(2, "ToshibaCAN: failed to get telemetry semaphore on write\n\r");
-                                break;
-                            }
-
-                            _telemetry[id.source_id - ESC_NODE_ID_FIRST].time = time.toUSec();
-                            _telemetry[id.source_id - ESC_NODE_ID_FIRST].voltage = frame.data[0] << 8 | frame.data[1];
-                            _telemetry[id.source_id - ESC_NODE_ID_FIRST].current = frame.data[2] << 8 | frame.data[3];
-                            _telemetry[id.source_id - ESC_NODE_ID_FIRST].rpm = frame.data[4] << 8 | frame.data[5];
-                            _telemetry[id.source_id - ESC_NODE_ID_FIRST].temp = frame.data[6];
-                            _telemetry[id.source_id - ESC_NODE_ID_FIRST].new_data = true;
-                            _telem_sem->give();
-                            break;
-                        }
-                        default:
-                            // discard frame
-                            break;
-                    }
-                }
-            }
-        }
-
         if (in_mask.write & inout_mask.write) {
-            now = AP_HAL::micros64();
-
             bool new_output = _new_output.load(std::memory_order_acquire);
 
+            // check for timeout sending to ESC
+            now = AP_HAL::micros64();
             if (sending_esc_num > 0) {
-                if (now - pwm_last_sent > SET_PWM_TIMEOUT_US) {
+                if ((now - pwm_last_sent) > SET_PWM_TIMEOUT_US) {
                     debug_can(2, "ToshibaCAN: timed-out after sending frame to ESC with ID %d\n\r", sending_esc_num - 1);
                     sending_esc_num = 0;
                 }
             }
 
+            // copy desired pwm outputs to output_buffer
             if (sending_esc_num == 0 && new_output) {
                 if (!_rc_out_sem->take(1)) {
                     debug_can(2, "ToshibaCAN: failed to get PWM semaphore on read\n\r");
                     continue;
                 }
-
                 memcpy(output_buffer, _scaled_output, TOSHIBACAN_MAX_NUM_ESCS * sizeof(uint16_t));
-
                 _rc_out_sem->give();
             }
 
-            if (sending_esc_num > 0 ||
-                (new_output && (pwm_last_sent == 0 || now - pwm_last_sent > SET_PWM_TIMEOUT_US)) ||
-                (pwm_last_sent != 0 && (now - pwm_last_sent > SET_PWM_MIN_INTERVAL_US))) {
+            if ((sending_esc_num > 0) ||
+                (new_output && (pwm_last_sent == 0 || (now - pwm_last_sent > SET_PWM_TIMEOUT_US))) ||
+                ((pwm_last_sent != 0) && (now - pwm_last_sent > SET_PWM_MIN_INTERVAL_US))) {
 
                 for (uint8_t esc_num = sending_esc_num; esc_num < _esc_max_node_id; esc_num++) {
 
@@ -496,11 +202,7 @@ void AP_ToshibaCAN::loop()
                         continue;
                     }
 
-                    be16_t kde_pwm = htobe16(output_buffer[esc_num]);
-
-                    if (hal.util->safety_switch_state() == AP_HAL::Util::SAFETY_DISARMED) {
-                        kde_pwm = 0;
-                    }
+                    be16_t tcan_pwm = htobe16(output_buffer[esc_num]);
 
                     frame_id_t id = { { .object_address = SET_PWM_OBJ_ADDR,
                                       .destination_id = uint8_t(esc_num + ESC_NODE_ID_FIRST),
@@ -508,7 +210,7 @@ void AP_ToshibaCAN::loop()
                                       .priority = 0,
                                       .unused = 0 } };
 
-                    uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &kde_pwm, sizeof(kde_pwm) };
+                    uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &tcan_pwm, sizeof(tcan_pwm) };
 
                     if (esc_num == 0) {
                         timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
@@ -516,8 +218,10 @@ void AP_ToshibaCAN::loop()
                         timeout = uavcan::MonotonicTime::fromUSec(pwm_last_sent + SET_PWM_TIMEOUT_US);
                     }
 
+                    // send frame to ESCs
                     int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(frame, timeout, 0);
 
+                    // check if send was successful
                     if (res == 1) {
                         if (esc_num == 0) {
                             pwm_last_sent = now;
@@ -536,26 +240,12 @@ void AP_ToshibaCAN::loop()
 
                     break;
                 }
-            } else if (now - telemetry_last_request > TELEMETRY_INTERVAL_US) {
-                frame_id_t id = { { .object_address = TELEMETRY_OBJ_ADDR,
-                                  .destination_id = BROADCAST_NODE_ID,
-                                  .source_id = AUTOPILOT_NODE_ID,
-                                  .priority = 0,
-                                  .unused = 0 } };
-
-                uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), nullptr, 0 };
-                timeout = uavcan::MonotonicTime::fromUSec(now + TELEMETRY_TIMEOUT_US);
-
-                int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(frame, timeout, 0);
-
-                if (res == 1) {
-                    telemetry_last_request = now;
-                }
             }
         }
     }
 }
 
+// called from SRV_Channels
 void AP_ToshibaCAN::update()
 {
     if (_rc_out_sem->take(1)) {
@@ -579,155 +269,6 @@ void AP_ToshibaCAN::update()
     } else {
         debug_can(2, "ToshibaCAN: failed to get PWM semaphore on write\n\r");
     }
-
-    DataFlash_Class *df = DataFlash_Class::instance();
-
-    if (df == nullptr || !df->should_log(0xFFFFFFFF)) {
-        return;
-    }
-
-    if (!_telem_sem->take(1)) {
-        debug_can(2, "ToshibaCAN: failed to get telemetry semaphore on DF read\n\r");
-        return;
-    }
-
-    telemetry_info_t telem_buffer[TOSHIBACAN_MAX_NUM_ESCS] {};
-
-    for (uint8_t i = 0; i < _esc_max_node_id; i++) {
-        if (_telemetry[i].new_data) {
-            telem_buffer[i] = _telemetry[i];
-            _telemetry[i].new_data = false;
-        }
-    }
-
-    _telem_sem->give();
-
-    uint8_t num_poles = _num_poles > 0 ? _num_poles : DEFAULT_NUM_POLES;
-
-    for (uint8_t i = 0; i < _esc_max_node_id; i++) {
-        if (telem_buffer[i].new_data) {
-            struct log_Esc pkt = {
-                LOG_PACKET_HEADER_INIT(uint8_t(LOG_ESC1_MSG+i)),
-                time_us     : telem_buffer[i].time,
-                rpm         : int32_t(telem_buffer[i].rpm * 60UL * 2 / num_poles * 100),
-                voltage     : telem_buffer[i].voltage,
-                current     : telem_buffer[i].current,
-                temperature : int16_t(telem_buffer[i].temp * 100U),
-                current_tot : 0
-            };
-            df->WriteBlock(&pkt, sizeof(pkt));
-        }
-    }
-}
-
-bool AP_ToshibaCAN::pre_arm_check(const char* &reason) const
-{
-    if (!_enum_sem->take(1)) {
-        debug_can(2, "ToshibaCAN: failed to get enumeration semaphore on read\n\r");
-        reason = "KDECAN enumeration state unknown";
-        return false;
-    }
-
-    if (_enumeration_state != ENUMERATION_STOPPED) {
-        reason = "KDECAN enumeration running";
-        _enum_sem->give();
-        return false;
-    }
-
-    _enum_sem->give();
-
-    uint16_t motors_mask = 0;
-    AP_Motors *motors = AP_Motors::get_instance();
-
-    if (motors) {
-        motors_mask = motors->get_motor_mask();
-    }
-
-    uint8_t num_expected_motors = __builtin_popcount(motors_mask);
-    uint8_t num_present_escs = __builtin_popcount(_esc_present_bitmask);
-
-    if (num_present_escs < num_expected_motors) {
-        reason = "Not enough KDECAN ESCs detected";
-        return false;
-    }
-
-    if (num_present_escs > num_expected_motors) {
-        reason = "Too many KDECAN ESCs detected";
-        return false;
-    }
-
-    if (_esc_max_node_id != num_expected_motors) {
-        reason = "Wrong KDECAN node IDs, run enumeration";
-        return false;
-    }
-
-    return true;
-}
-
-void AP_ToshibaCAN::send_mavlink(uint8_t chan) const
-{
-    if (!_telem_sem->take(1)) {
-        debug_can(2, "ToshibaCAN: failed to get telemetry semaphore on MAVLink read\n\r");
-        return;
-    }
-
-    telemetry_info_t telem_buffer[TOSHIBACAN_MAX_NUM_ESCS];
-    memcpy(telem_buffer, _telemetry, sizeof(telemetry_info_t) * TOSHIBACAN_MAX_NUM_ESCS);
-    _telem_sem->give();
-
-    uint16_t voltage[4] {};
-    uint16_t current[4] {};
-    uint16_t rpm[4] {};
-    uint8_t temperature[4] {};
-    uint16_t totalcurrent[4] {};
-    uint16_t count[4] {};
-    uint8_t num_poles = _num_poles > 0 ? _num_poles : DEFAULT_NUM_POLES;
-    uint64_t now = AP_HAL::micros64();
-
-    for (uint8_t i = 0; i < _esc_max_node_id && i < 8; i++) {
-        uint8_t idx = i % 4;
-        if (telem_buffer[i].time && (now - telem_buffer[i].time < 1000000)) {
-            voltage[idx]      = telem_buffer[i].voltage;
-            current[idx]      = telem_buffer[i].current;
-            rpm[idx]          = uint16_t(telem_buffer[i].rpm  * 60UL * 2 / num_poles);
-            temperature[idx]  = telem_buffer[i].temp;
-        } else {
-            voltage[idx] = 0;
-            current[idx] = 0;
-            rpm[idx] = 0;
-            temperature[idx] = 0;
-        }
-
-        if (idx == 3 || i == _esc_max_node_id - 1) {
-            if (!HAVE_PAYLOAD_SPACE((mavlink_channel_t)chan, ESC_TELEMETRY_1_TO_4)) {
-                return;
-            }
-
-            if (i < 4) {
-                mavlink_msg_esc_telemetry_1_to_4_send((mavlink_channel_t)chan, temperature, voltage, current, totalcurrent, rpm, count);
-            } else {
-                mavlink_msg_esc_telemetry_5_to_8_send((mavlink_channel_t)chan, temperature, voltage, current, totalcurrent, rpm, count);
-            }
-        }
-    }
-}
-
-bool AP_ToshibaCAN::run_enumeration(bool start_stop)
-{
-    if (!_enum_sem->take(1)) {
-        debug_can(2, "ToshibaCAN: failed to get enumeration semaphore on write\n\r");
-        return false;
-    }
-
-    if (start_stop) {
-        _enumeration_state = ENUMERATION_START;
-    } else if (_enumeration_state != ENUMERATION_STOPPED) {
-        _enumeration_state = ENUMERATION_STOP;
-    }
-
-    _enum_sem->give();
-
-    return true;
 }
 
 #endif // HAL_WITH_UAVCAN

@@ -62,7 +62,7 @@ private:
     uint8_t _esc_max_node_id;
 
     // PWM output
-    AP_HAL::Semaphore *_rc_out_sem;
+    HAL_Semaphore _rc_out_sem;
     std::atomic<bool> _new_output;
     uint16_t _scaled_output[TOSHIBACAN_MAX_NUM_ESCS];
 

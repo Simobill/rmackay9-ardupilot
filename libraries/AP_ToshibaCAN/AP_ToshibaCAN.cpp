@@ -57,13 +57,7 @@ AP_ToshibaCAN::AP_ToshibaCAN()
 {
     AP_Param::setup_object_defaults(this, var_info);
 
-    //_rc_out_sem = hal.util->new_semaphore();
     debug_can(2, "ToshibaCAN: constructed\n\r");
-}
-
-AP_ToshibaCAN::~AP_ToshibaCAN()
-{
-    delete _rc_out_sem;
 }
 
 AP_ToshibaCAN *AP_ToshibaCAN::get_tcan(uint8_t driver_index)
@@ -122,7 +116,6 @@ void AP_ToshibaCAN::init(uint8_t driver_index)
 // loop to send output to ESCs in background thread
 void AP_ToshibaCAN::loop()
 {
-    return;
     uavcan::MonotonicTime timeout;
     uavcan::CanFrame empty_frame { (0 | uavcan::CanFrame::FlagEFF), nullptr, 0 };
     const uavcan::CanFrame* select_frames[uavcan::MaxCanIfaces] { };
@@ -145,6 +138,7 @@ void AP_ToshibaCAN::loop()
         }
 
         if (!_esc_present_bitmask) {
+            // if no ESCs wait 1ms and try again
             debug_can(1, "ToshibaCAN: no valid ESC present");
             hal.scheduler->delay(1000);
             continue;
@@ -173,6 +167,8 @@ void AP_ToshibaCAN::loop()
         uavcan::CanSelectMasks in_mask = inout_mask;
         _can_driver->select(inout_mask, select_frames, timeout);
 
+        return;
+
         if (in_mask.write & inout_mask.write) {
             bool new_output = _new_output.load(std::memory_order_acquire);
 
@@ -187,12 +183,12 @@ void AP_ToshibaCAN::loop()
 
             // copy desired pwm outputs to output_buffer
             if (sending_esc_num == 0 && new_output) {
-                if (!_rc_out_sem->take(1)) {
+                if (!_rc_out_sem.take(1)) {
                     debug_can(2, "ToshibaCAN: failed to get PWM semaphore on read\n\r");
                     continue;
                 }
                 memcpy(output_buffer, _scaled_output, TOSHIBACAN_MAX_NUM_ESCS * sizeof(uint16_t));
-                _rc_out_sem->give();
+                _rc_out_sem.give();
             }
 
             if ((sending_esc_num > 0) ||
@@ -251,8 +247,7 @@ void AP_ToshibaCAN::loop()
 // called from SRV_Channels
 void AP_ToshibaCAN::update()
 {
-    return;
-    if (_rc_out_sem->take(1)) {
+    if (_rc_out_sem.take(1)) {
         for (uint8_t i = 0; i < TOSHIBACAN_MAX_NUM_ESCS; i++) {
             if ((_esc_present_bitmask & (1 << i)) == 0) {
                 continue;
@@ -268,7 +263,7 @@ void AP_ToshibaCAN::update()
             }
         }
 
-        _rc_out_sem->give();
+        _rc_out_sem.give();
         _new_output.store(true, std::memory_order_release);
     } else {
         debug_can(2, "ToshibaCAN: failed to get PWM semaphore on write\n\r");

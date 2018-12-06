@@ -122,6 +122,7 @@ void AP_ToshibaCAN::init(uint8_t driver_index)
 // loop to send output to ESCs in background thread
 void AP_ToshibaCAN::loop()
 {
+    return;
     uavcan::MonotonicTime timeout;
     uavcan::CanFrame empty_frame { (0 | uavcan::CanFrame::FlagEFF), nullptr, 0 };
     const uavcan::CanFrame* select_frames[uavcan::MaxCanIfaces] { };
@@ -250,6 +251,7 @@ void AP_ToshibaCAN::loop()
 // called from SRV_Channels
 void AP_ToshibaCAN::update()
 {
+    return;
     if (_rc_out_sem->take(1)) {
         for (uint8_t i = 0; i < TOSHIBACAN_MAX_NUM_ESCS; i++) {
             if ((_esc_present_bitmask & (1 << i)) == 0) {

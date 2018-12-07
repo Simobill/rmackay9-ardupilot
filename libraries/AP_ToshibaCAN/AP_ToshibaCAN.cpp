@@ -117,17 +117,13 @@ void AP_ToshibaCAN::init(uint8_t driver_index)
 void AP_ToshibaCAN::loop()
 {
     uavcan::MonotonicTime timeout;
-    uavcan::CanFrame empty_frame { (0 | uavcan::CanFrame::FlagEFF), nullptr, 0 };
+    uavcan::CanFrame empty_frame { (0 | uavcan::CanFrame::MaskStdID), nullptr, 0 };
     const uavcan::CanFrame* select_frames[uavcan::MaxCanIfaces] { };
     select_frames[CAN_IFACE_INDEX] = &empty_frame;
 
-    uint16_t output_buffer[TOSHIBACAN_MAX_NUM_ESCS] {};
+    const uint32_t loop_interval_us = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
 
-    const uint32_t LOOP_INTERVAL_US = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
-    uint64_t pwm_last_sent = 0;
-    uint8_t sending_esc_num = 0;
-
-    uint64_t telemetry_last_request = 0;
+    //return;
 
     while (true) {
         if (!_initialized) {
@@ -145,29 +141,47 @@ void AP_ToshibaCAN::loop()
         }
 
         uint64_t now = AP_HAL::micros64();
+
+        // send message to unlock motors
+        //frame_id_t id = {{.id1 = COMMAND_LOCK, .id2 = 0x0}};
+        frame_id_t id = {{.id1 = 0x0, .id2 = COMMAND_LOCK}};
+        uint8_t data[12] = {0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
+        uavcan::CanFrame frame { (id.value | uavcan::CanFrame::MaskStdID), data, ARRAY_SIZE(data) };
         uavcan::CanSelectMasks inout_mask;
-        inout_mask.read = 1 << CAN_IFACE_INDEX;
-        timeout = uavcan::MonotonicTime::fromUSec(now + LOOP_INTERVAL_US);
-
-        if ((sending_esc_num > 0) ||
-            (_new_output.load(std::memory_order_acquire) && ((pwm_last_sent == 0) || (now - pwm_last_sent > SET_PWM_TIMEOUT_US))) ||
-            ((pwm_last_sent != 0) && (now - pwm_last_sent > SET_PWM_MIN_INTERVAL_US))) {
-
-            inout_mask.write = 1 << CAN_IFACE_INDEX;
-        } else {
-            uint64_t next_action = MIN(now + LOOP_INTERVAL_US, telemetry_last_request + TELEMETRY_INTERVAL_US);
-
-            if (pwm_last_sent != 0) {
-                next_action = MIN(next_action, pwm_last_sent + SET_PWM_MIN_INTERVAL_US);
-            }
-
-            timeout = uavcan::MonotonicTime::fromUSec(next_action);
-        }
-
-        uavcan::CanSelectMasks in_mask = inout_mask;
+        inout_mask.write = 1 << CAN_IFACE_INDEX;
+        select_frames[CAN_IFACE_INDEX] = &frame;
+        timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
         _can_driver->select(inout_mask, select_frames, timeout);
 
+        // send message to spin motors
+        id.id2 = COMMAND_MOTOR1;
+        motor_rotation_cmd_t mot_rot_data = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
+        frame = { (id.value | uavcan::CanFrame::MaskStdID), mot_rot_data.data, ARRAY_SIZE(mot_rot_data.data) };
+        select_frames[CAN_IFACE_INDEX] = &frame;
+        _can_driver->select(inout_mask, select_frames, timeout);
+
+        /*
+        frame_id_t id = { { .object_address = ENUM_OBJ_ADDR,
+                          .destination_id = BROADCAST_NODE_ID,
+                          .source_id = AUTOPILOT_NODE_ID,
+                          .priority = 0,
+                          .unused = 0 } };
+        be16_t data = htobe16((uint16_t) ENUMERATION_TIMEOUT_MS);
+        uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &data, sizeof(data) };
+
+        uavcan::CanSelectMasks in_mask = inout_mask;
+        select_frames[CAN_IFACE_INDEX] = &frame;
+
+        _can_driver->select(inout_mask, select_frames, timeout);
+        */
+
+/*
         return;
+
+        //uavcan::CanSelectMasks in_mask = inout_mask;
+        _can_driver->select(inout_mask, select_frames, timeout);
+
+        //return;
 
         if (in_mask.write & inout_mask.write) {
             bool new_output = _new_output.load(std::memory_order_acquire);
@@ -241,6 +255,7 @@ void AP_ToshibaCAN::loop()
                 }
             }
         }
+    */
     }
 }
 

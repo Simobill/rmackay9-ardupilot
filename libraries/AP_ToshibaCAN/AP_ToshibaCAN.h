@@ -12,14 +12,12 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
- 
+
 #pragma once
 
 #include <AP_HAL/CAN.h>
 #include <AP_HAL/Semaphores.h>
-
 #include <AP_Param/AP_Param.h>
-
 #include <atomic>
 
 // there are 12 motor functions in SRV_Channel but CAN driver can't keep up
@@ -66,16 +64,39 @@ private:
     std::atomic<bool> _new_output;
     uint16_t _scaled_output[TOSHIBACAN_MAX_NUM_ESCS];
 
+    // structure for starting frame of message to ESC
     union frame_id_t {
         struct {
-            uint8_t object_address;
-            uint8_t destination_id;
-            uint8_t source_id;
-            uint8_t priority:5;
-            uint8_t unused:3;
+            uint16_t id1;
+            uint16_t id2;
         };
         uint32_t value;
     };
+
+    // structure for sending turn rate command to ESC
+    union motor_rotation_cmd_t {
+        struct {
+            int16_t motor1;
+            int16_t motor2;
+            int16_t motor3;
+            int16_t motor4;
+        };
+        uint8_t data[8];
+    };
+
+    // data format for messages from flight controller
+    static const uint8_t COMMAND_STOP = 0x0;
+    static const uint8_t COMMAND_LOCK = 0x10;
+    static const uint8_t COMMAND_REQUEST_DATA = 0x20;
+    static const uint8_t COMMAND_MOTOR3 = 0x3B;
+    static const uint8_t COMMAND_MOTOR2 = 0x3D;
+    static const uint8_t COMMAND_MOTOR1 = 0x3F;
+
+    // data format for messages from ESC
+    static const uint8_t MOTOR_DATA1 = 0x40;
+    static const uint8_t MOTOR_DATA2 = 0x50;
+    static const uint8_t MOTOR_DATA3 = 0x60;
+    static const uint8_t MOTOR_DATA5 = 0x80;
 
     static const uint8_t AUTOPILOT_NODE_ID = 0;
     static const uint8_t BROADCAST_NODE_ID = 1;

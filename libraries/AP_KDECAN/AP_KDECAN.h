@@ -33,7 +33,7 @@
 class AP_KDECAN : public AP_HAL::CANProtocol {
 public:
     AP_KDECAN();
-    
+
     /* Do not allow copies */
     AP_KDECAN(const AP_KDECAN &other) = delete;
     AP_KDECAN &operator=(const AP_KDECAN&) = delete;
@@ -47,7 +47,7 @@ public:
 
     // called from SRV_Channels
     void update();
-    
+
     // check that arming can happen
     bool pre_arm_check(const char* &reason);
 

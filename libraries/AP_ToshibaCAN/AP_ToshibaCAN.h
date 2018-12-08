@@ -67,15 +67,34 @@ private:
     // structure for starting frame of message to ESC
     union frame_id_t {
         struct {
-            uint16_t id1;
-            uint16_t id2;
+            uint8_t id1;
+            uint8_t id2;
         };
-        uint32_t value;
+        uint16_t value;
+    };
+
+    // structure for sending motor lock command to ESC
+    union motor_lock_cmd_t {
+        struct PACKED {
+            int8_t motor1:4;
+            int8_t motor2:4;
+            int8_t motor3:4;
+            int8_t motor4:4;
+            int8_t motor5:4;
+            int8_t motor6:4;
+            int8_t motor7:4;
+            int8_t motor8:4;
+            int8_t motor9:4;
+            int8_t motor10:4;
+            int8_t motor11:4;
+            int8_t motor12:4;
+        };
+        uint8_t data[6];
     };
 
     // structure for sending turn rate command to ESC
     union motor_rotation_cmd_t {
-        struct {
+        struct PACKED {
             int16_t motor1;
             int16_t motor2;
             int16_t motor3;

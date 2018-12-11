@@ -123,7 +123,7 @@ void AP_ToshibaCAN::loop()
 
     const uint32_t loop_interval_us = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
 
-    //return;
+    static uint8_t stage = 0;  // 0 = locking, 1 = unlocking, 2 = sending motor updates
 
     while (true) {
         if (!_initialized) {
@@ -140,82 +140,124 @@ void AP_ToshibaCAN::loop()
             continue;
         }
 
-        // prepare message to unlock motors
-        //frame_id_t id = {{.id1 = COMMAND_LOCK, .id2 = 0x0}};
-        //frame_id_t id = {{.id1 = 0x0, .id2 = COMMAND_LOCK}};
-        motor_lock_cmd_t lock_cmd = {{1,1,1,1,1,1,1,1,1,1,1,1}};
-        uavcan::CanFrame lock_frame { ((uint8_t)COMMAND_LOCK | uavcan::CanFrame::MaskStdID), lock_cmd.data, ARRAY_SIZE(lock_cmd.data) };  // MaskExtID? MaskStdID?
-        //uavcan::CanFrame lock_frame { ((uint8_t)COMMAND_LOCK | uavcan::CanFrame::MaskExtID), lock_cmd.data, ARRAY_SIZE(lock_cmd.data) };  // MaskExtID? MaskStdID?
+        // lock motors
+        if (stage == 0) {
+            // prepare message to LOCK motors
+            motor_lock_cmd_t lock_cmd = {{2,2,2,2,2,2,2,2,2,2,2,2}};
+            uavcan::CanFrame lock_frame {((uint8_t)COMMAND_LOCK | uavcan::CanFrame::MaskStdID), lock_cmd.data, ARRAY_SIZE(lock_cmd.data)};
 
-        // wait for space in buffer to send
-        uint64_t now = AP_HAL::micros64();
-        uavcan::CanSelectMasks inout_mask;
-        inout_mask.write = 1 << CAN_IFACE_INDEX;
-        select_frames[CAN_IFACE_INDEX] = &lock_frame;
-        timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
-        _can_driver->select(inout_mask, select_frames, timeout);
+            // wait for space in buffer to send
+            uint64_t now = AP_HAL::micros64();
+            uavcan::CanSelectMasks inout_mask;
+            inout_mask.write = 1 << CAN_IFACE_INDEX;
+            select_frames[CAN_IFACE_INDEX] = &lock_frame;
+            timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
+            _can_driver->select(inout_mask, select_frames, timeout);
 
-        // double check space to send is available
-        if (!inout_mask.write) {
-            continue;
+            // double check space to send is available
+            if (!inout_mask.write) {
+                continue;
+            }
+
+            // send lock command
+            now = AP_HAL::micros64();
+            timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
+            int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(lock_frame, timeout, 0);
+
+            // check results
+            if (res == 1) {
+                // success
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"lok!");
+                // move to next stage
+                stage = 1;
+            } else if (res == 0) {
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
+                continue;
+            } else {
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
+                continue;
+            }
         }
 
-        // send unlock command
-        now = AP_HAL::micros64();
-        timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
-        int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(lock_frame, timeout, 0);
+        // unlock motors
+        if (stage == 1) {
+            // prepare message to unlock motors
+            motor_lock_cmd_t unlock_cmd = {{1,1,1,1,1,1,1,1,1,1,1,1}};
+            uavcan::CanFrame unlock_frame { ((uint8_t)COMMAND_LOCK | uavcan::CanFrame::MaskStdID), unlock_cmd.data, ARRAY_SIZE(unlock_cmd.data) };
 
-        // check results
-        if (res == 1) {
-            // success
-            //gcs().send_text(MAV_SEVERITY_CRITICAL,"tok!");
-            //debug_can(1, "ToshibaCAN: success!\n\r");
-        } else if (res == 0) {
-            gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
-            //debug_can(1, "ToshibaCAN: strange buffer full when starting ESC enumeration\n\r");
-            continue;
-        } else {
-            gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
-            //debug_can(1, "ToshibaCAN: error sending message to start ESC enumeration, result %d\n\r", res);
-            continue;
+            // wait for space in buffer to send
+            uint32_t now = AP_HAL::micros64();
+            uavcan::CanSelectMasks inout_mask;
+            inout_mask.write = 1 << CAN_IFACE_INDEX;
+            select_frames[CAN_IFACE_INDEX] = &unlock_frame;
+            timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
+            _can_driver->select(inout_mask, select_frames, timeout);
+
+            // double check space to send is available
+            if (!inout_mask.write) {
+                continue;
+            }
+
+            // send unlock command
+            now = AP_HAL::micros64();
+            timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
+            int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(unlock_frame, timeout, 0);
+
+            // check results
+            if (res == 1) {
+                // success
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"ulok!");
+                // move to next stage
+                stage = 2;
+            } else if (res == 0) {
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"f2!");
+                continue;
+            } else {
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"f3!");
+                continue;
+            }
         }
 
-        // prepare message to spin motors
-        motor_rotation_cmd_t mot_rot_cmd = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
-        uavcan::CanFrame mot_rot_frame { ((uint8_t)COMMAND_MOTOR1 | uavcan::CanFrame::MaskStdID), mot_rot_cmd.data, ARRAY_SIZE(mot_rot_cmd.data) };  // MaskExtID? MaskStdID?
-        //uavcan::CanFrame mot_rot_frame { ((uint8_t)COMMAND_MOTOR1 | uavcan::CanFrame::MaskExtID), mot_rot_cmd.data, ARRAY_SIZE(mot_rot_cmd.data) };  // MaskExtID? MaskStdID?
+        // send motor commands
+        if (stage == 2) {
+            // prepare message to spin motors
+            motor_rotation_cmd_t mot_rot_cmd; // = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
+            mot_rot_cmd.motor1 = htobe16((uint16_t)6300);
+            mot_rot_cmd.motor2 = htobe16((uint16_t)6300);
+            mot_rot_cmd.motor3 = htobe16((uint16_t)6300);
+            mot_rot_cmd.motor4 = htobe16((uint16_t)6300);
 
-        // wait for space in buffer to send
-        now = AP_HAL::micros64();
-        inout_mask.read = 0;
-        inout_mask.write = 1 << CAN_IFACE_INDEX;
-        select_frames[CAN_IFACE_INDEX] = &mot_rot_frame;
-        timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
-        _can_driver->select(inout_mask, select_frames, timeout);
+            uavcan::CanFrame mot_rot_frame {((uint8_t)COMMAND_MOTOR1 | uavcan::CanFrame::MaskStdID), mot_rot_cmd.data, ARRAY_SIZE(mot_rot_cmd.data)};
 
-        // double check space to send is available
-        if (!inout_mask.write) {
-            continue;
-        }
+            // wait for space in buffer to send
+            uint32_t now = AP_HAL::micros64();
+            uavcan::CanSelectMasks inout_mask;
+            inout_mask.write = 1 << CAN_IFACE_INDEX;
+            select_frames[CAN_IFACE_INDEX] = &mot_rot_frame;
+            timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
+            _can_driver->select(inout_mask, select_frames, timeout);
 
-        // send motor rotation command
-        now = AP_HAL::micros64();
-        timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
-        res = _can_driver->getIface(CAN_IFACE_INDEX)->send(mot_rot_frame, timeout, 0);
+            // double check space to send is available
+            if (!inout_mask.write) {
+                continue;
+            }
 
-        // check results
-        if (res == 1) {
-            // success
-            gcs().send_text(MAV_SEVERITY_CRITICAL,"mok!");
-            //debug_can(1, "ToshibaCAN: success!\n\r");
-        } else if (res == 0) {
-            gcs().send_text(MAV_SEVERITY_CRITICAL,"m1!");
-            //debug_can(1, "ToshibaCAN: strange buffer full when starting ESC enumeration\n\r");
-            continue;
-        } else {
-            gcs().send_text(MAV_SEVERITY_CRITICAL,"m1!");
-            //debug_can(1, "ToshibaCAN: error sending message to start ESC enumeration, result %d\n\r", res);
-            continue;
+            // send motor rotation command
+            now = AP_HAL::micros64();
+            timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
+            int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(mot_rot_frame, timeout, 0);
+
+            // check results
+            if (res == 1) {
+                // success
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"mok!");
+            } else if (res == 0) {
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"m1!");
+                continue;
+            } else {
+                gcs().send_text(MAV_SEVERITY_CRITICAL,"m1!");
+                continue;
+            }
         }
 
         /*id.id2 = COMMAND_MOTOR1;

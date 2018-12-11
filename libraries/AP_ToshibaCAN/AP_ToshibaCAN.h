@@ -64,15 +64,6 @@ private:
     std::atomic<bool> _new_output;
     uint16_t _scaled_output[TOSHIBACAN_MAX_NUM_ESCS];
 
-    // structure for starting frame of message to ESC
-    union frame_id_t {
-        struct {
-            uint8_t id1;
-            uint8_t id2;
-        };
-        uint16_t value;
-    };
-
     // structure for sending motor lock command to ESC
     union motor_lock_cmd_t {
         struct PACKED {
@@ -95,10 +86,10 @@ private:
     // structure for sending turn rate command to ESC
     union motor_rotation_cmd_t {
         struct PACKED {
-            int16_t motor1;
-            int16_t motor2;
-            int16_t motor3;
             int16_t motor4;
+            int16_t motor3;
+            int16_t motor2;
+            int16_t motor1;
         };
         uint8_t data[8];
     };

@@ -143,9 +143,9 @@ void AP_ToshibaCAN::loop()
         // lock motors
         if (stage == 0) {
             // prepare message to LOCK motors
-            //motor_lock_cmd_t lock_cmd = {{2,2,2,2,2,2,2,2,2,2,2,2}};
-            motor_lock_cmd_t lock_cmd = {{2,0,0,0,0,0,0,0,0,0,0,0}};
-            uavcan::CanFrame lock_frame {(COMMAND_LOCK | uavcan::CanFrame::MaskStdID), lock_cmd.data, sizeof(lock_cmd.data)};
+            motor_lock_cmd_t lock_cmd = {{2,2,2,2,2,2,2,2,2,2,2,2}};
+            //motor_lock_cmd_t lock_cmd = {{2,0,0,0,0,0,0,0,0,0,0,0}};
+            uavcan::CanFrame lock_frame {(uint8_t)COMMAND_LOCK, lock_cmd.data, sizeof(lock_cmd.data)};
 
             // wait for space in buffer to send
             uint64_t now = AP_HAL::micros64();
@@ -170,7 +170,7 @@ void AP_ToshibaCAN::loop()
                 // success
                 gcs().send_text(MAV_SEVERITY_CRITICAL,"lok!");
                 // move to next stage
-                stage = 1;
+                //stage = 1;
             } else if (res == 0) {
                 gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
                 continue;
@@ -185,7 +185,7 @@ void AP_ToshibaCAN::loop()
             // prepare message to unlock motors
             //motor_lock_cmd_t unlock_cmd = {{1,1,1,1,1,1,1,1,1,1,1,1}};
             motor_lock_cmd_t unlock_cmd = {{1,0,0,0,0,0,0,0,0,0,0,0}};
-            uavcan::CanFrame unlock_frame { (COMMAND_LOCK | uavcan::CanFrame::MaskStdID), unlock_cmd.data, sizeof(unlock_cmd.data) };
+            uavcan::CanFrame unlock_frame {(uint8_t)COMMAND_LOCK, unlock_cmd.data, sizeof(unlock_cmd.data)};
 
             // wait for space in buffer to send
             uint32_t now = AP_HAL::micros64();
@@ -224,12 +224,12 @@ void AP_ToshibaCAN::loop()
         if (stage == 2) {
             // prepare message to spin motors
             motor_rotation_cmd_t mot_rot_cmd; // = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
-            mot_rot_cmd.motor1 = htobe16((uint16_t)0);
+            mot_rot_cmd.motor1 = htobe16((uint16_t)6300);
             mot_rot_cmd.motor2 = htobe16((uint16_t)0);
             mot_rot_cmd.motor3 = htobe16((uint16_t)0);
             mot_rot_cmd.motor4 = htobe16((uint16_t)0);
 
-            uavcan::CanFrame mot_rot_frame {(COMMAND_MOTOR1 | uavcan::CanFrame::MaskStdID), mot_rot_cmd.data, sizeof(mot_rot_cmd.data)};
+            uavcan::CanFrame mot_rot_frame {((uint8_t)COMMAND_MOTOR1 & uavcan::CanFrame::MaskStdID), mot_rot_cmd.data, sizeof(mot_rot_cmd.data)};
 
             // wait for space in buffer to send
             uint32_t now = AP_HAL::micros64();

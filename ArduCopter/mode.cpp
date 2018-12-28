@@ -364,10 +364,6 @@ void Copter::Mode::make_safe_shut_down()
     switch (motors->get_spool_mode()) {
 
     case AP_Motors::SHUT_DOWN:
-        // when we reach shutdown state command a disarm
-        copter.init_disarm_motors();
-        FALLTHROUGH;
-
     case AP_Motors::GROUND_IDLE:
         // relax controllers during idle states
         attitude_control->reset_rate_controller_I_terms();

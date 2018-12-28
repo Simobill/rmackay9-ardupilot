@@ -53,6 +53,12 @@ void Copter::ModeLand::run()
 //      should be called at 100hz or more
 void Copter::ModeLand::gps_run()
 {
+    // TODO: this needs fixing because it will not spool down motors
+    // disarm when the landing detector says we've landed
+    if (ap.land_complete) {
+        copter.init_disarm_motors();
+    }
+
     // Land State Machine Determination
     // todo: this code is used in multiple places
     if (!motors->armed() || !ap.auto_armed || ap.land_complete) {
@@ -97,6 +103,12 @@ void Copter::ModeLand::nogps_run()
 
         // get pilot's desired yaw rate
         target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
+    }
+
+    // TODO: this needs fixing because it will not spool down motors
+    // disarm when the landing detector says we've landed
+    if (ap.land_complete) {
+        copter.init_disarm_motors();
     }
 
     // Land State Machine Determination

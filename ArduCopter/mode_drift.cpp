@@ -33,7 +33,7 @@ bool Copter::ModeDrift::init(bool ignore_checks)
 {
     if (copter.position_ok() || ignore_checks) {
         return true;
-    }else{
+    } else {
         return false;
     }
 }
@@ -62,18 +62,18 @@ void Copter::ModeDrift::run()
 
     roll_vel = constrain_float(roll_vel, -DRIFT_SPEEDLIMIT, DRIFT_SPEEDLIMIT);
     pitch_vel = constrain_float(pitch_vel, -DRIFT_SPEEDLIMIT, DRIFT_SPEEDLIMIT);
-    
+
     roll_input = roll_input * .96f + (float)channel_yaw->get_control_in() * .04f;
 
-    //convert user input into desired roll velocity
+    // convert user input into desired roll velocity
     float roll_vel_error = roll_vel - (roll_input / DRIFT_SPEEDGAIN);
 
-    // Roll velocity is feed into roll acceleration to minimize slip
+    // roll velocity is feed into roll acceleration to minimize slip
     target_roll = roll_vel_error * -DRIFT_SPEEDGAIN;
     target_roll = constrain_float(target_roll, -4500.0f, 4500.0f);
 
     // If we let go of sticks, bring us to a stop
-    if(is_zero(target_pitch)){
+    if (is_zero(target_pitch)) {
         // .14/ (.03 * 100) = 4.6 seconds till full braking
         braker += .03f;
         braker = MIN(braker, DRIFT_SPEEDGAIN);

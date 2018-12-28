@@ -25,7 +25,7 @@ bool Copter::ModeBrake::init(bool ignore_checks)
         _timeout_ms = 0;
 
         return true;
-    }else{
+    } else {
         return false;
     }
 }
@@ -53,8 +53,6 @@ void Copter::ModeBrake::run()
 
     // call attitude controller
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(wp_nav->get_roll(), wp_nav->get_pitch(), 0.0f);
-
-    // body-frame rate controller is run directly from 100hz loop
 
     // update altitude target and call position controller
     // protects heli's from inflight motor interlock disable

@@ -93,13 +93,11 @@ void Copter::auto_disarm_check()
         return;
     }
 
-#if FRAME_CONFIG == HELI_FRAME
     // if the rotor is still spinning, don't initiate auto disarm
-    if (motors->rotor_speed_above_critical()) {
+    if (motors->get_spool_mode() != AP_Motors::GROUND_IDLE) {
         auto_disarm_begin = tnow_ms;
         return;
     }
-#endif
 
     // always allow auto disarm if using interlock switch or motors are Emergency Stopped
     if ((ap.using_interlock && !motors->get_interlock()) || ap.motor_emergency_stop) {
@@ -309,6 +307,23 @@ void Copter::motors_output()
         // landing must continue to run the motors output
     }
 #endif
+
+    static AP_Motors::spool_up_down_mode last_spool_mode = AP_Motors::SHUT_DOWN;
+
+    if (last_spool_mode != motors->get_spool_mode()) {
+        last_spool_mode = motors->get_spool_mode();
+        if (last_spool_mode == AP_Motors::SHUT_DOWN) {
+            gcs().send_text(MAV_SEVERITY_INFO,"Spool mode: SHUT_DOWN");  
+        } else if (last_spool_mode == AP_Motors::GROUND_IDLE) {
+            gcs().send_text(MAV_SEVERITY_INFO,"Spool mode: GROUND_IDLE");  
+        } else if (last_spool_mode == AP_Motors::SPOOL_UP) {
+            gcs().send_text(MAV_SEVERITY_INFO,"Spool mode: SPOOL_UP");  
+        } else if (last_spool_mode == AP_Motors::THROTTLE_UNLIMITED) {
+            gcs().send_text(MAV_SEVERITY_INFO,"Spool mode: THROTTLE_UNLIMITED");  
+        } else if (last_spool_mode == AP_Motors::SPOOL_DOWN) {
+            gcs().send_text(MAV_SEVERITY_INFO,"Spool mode: SPOOL_DOWN");  
+        }
+    }     
 
     // Update arming delay state
     if (ap.in_arming_delay && (!motors->armed() || millis()-arm_time_ms > ARMING_DELAY_SEC*1.0e3f || control_mode == THROW)) {

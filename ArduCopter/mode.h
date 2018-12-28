@@ -109,12 +109,24 @@ protected:
 
     // helper functions
     void zero_throttle_and_relax_ac();
+    void zero_throttle_and_hold_attitude();
+    void make_safe_shut_down();
 
     // functions to control landing
     // in modes that support landing
     int32_t get_alt_above_ground(void);
     void land_run_horizontal_control();
     void land_run_vertical_control(bool pause_descent = false);
+
+    // Alt_Hold based flight mode states used in Alt_Hold, Loiter, and Sport
+    enum AltHoldModeState {
+        AltHold_MotorStopped,
+        AltHold_Takeoff,
+        AltHold_Landed_Ground_Idle,
+        AltHold_Landed_Pre_Takeoff,
+        AltHold_Flying
+    };
+    AltHoldModeState get_alt_hold_state(float target_climb_rate_cms);
 
     // convenience references to avoid code churn in conversion:
     Parameters &g;
@@ -149,7 +161,7 @@ protected:
         void stop();
         void get_climb_rates(float& pilot_climb_rate,
                              float& takeoff_climb_rate);
-        bool triggered(float target_climb_rate) const;
+        bool triggered(float target_climb_rate_cms) const;
 
         bool running() const { return _running; }
     private:
@@ -172,10 +184,6 @@ protected:
     void auto_takeoff_attitude_run(float target_yaw_rate);
     // altitude below which we do no navigation in auto takeoff
     static float auto_takeoff_no_nav_alt_cm;
-
-#if FRAME_CONFIG == HELI_FRAME
-    heli_flags_t &heli_flags;
-#endif
 
     // pass-through functions to reduce code churn on conversion;
     // these are candidates for moving into the Mode base

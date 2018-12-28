@@ -23,9 +23,6 @@ Copter::Mode::Mode(void) :
     channel_throttle(copter.channel_throttle),
     channel_yaw(copter.channel_yaw),
     G_Dt(copter.G_Dt),
-#if FRAME_CONFIG == HELI_FRAME
-    heli_flags(copter.heli_flags),
-#endif
     ap(copter.ap)
 { };
 
@@ -193,15 +190,12 @@ bool Copter::set_mode(control_mode_t mode, mode_reason_t reason)
 
     bool ignore_checks = !motors->armed();   // allow switching to any mode if disarmed.  We rely on the arming check to perform
 
-#if FRAME_CONFIG == HELI_FRAME
-    // do not allow helis to enter a non-manual throttle mode if the
-    // rotor runup is not complete
-    if (!ignore_checks && !new_flightmode->has_manual_throttle() && !motors->rotor_runup_complete()){
+    // do not allow aircraft to enter a non-manual throttle mode if the during spool up or spool down
+    if (!ignore_checks && !new_flightmode->has_manual_throttle() && (motors->get_spool_mode() == AP_Motors::SPOOL_UP || motors->get_spool_mode() == AP_Motors::SPOOL_DOWN)){
         gcs().send_text(MAV_SEVERITY_WARNING,"Flight mode change failed");
         Log_Write_Error(ERROR_SUBSYSTEM_FLIGHT_MODE,mode);
         return false;
     }
-#endif
 
     if (!new_flightmode->init(ignore_checks)) {
         gcs().send_text(MAV_SEVERITY_WARNING,"Flight mode change failed");
@@ -357,38 +351,46 @@ void Copter::Mode::get_pilot_desired_lean_angles(float &roll_out, float &pitch_o
     // roll_out and pitch_out are returned
 }
 
-bool Copter::Mode::_TakeOff::triggered(const float target_climb_rate) const
-{
-    if (!copter.ap.land_complete) {
-        // can't take off if we're already flying
-        return false;
-    }
-    if (target_climb_rate <= 0.0f) {
-        // can't takeoff unless we want to go up...
-        return false;
-    }
-#if FRAME_CONFIG == HELI_FRAME
-    if (!copter.motors->rotor_runup_complete()) {
-        // hold heli on the ground until rotor speed runup has finished
-        return false;
-    }
-#endif
-    return true;
-}
-
 void Copter::Mode::zero_throttle_and_relax_ac()
 {
-#if FRAME_CONFIG == HELI_FRAME
-    // Helicopters always stabilize roll/pitch/yaw
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(0.0f, 0.0f, 0.0f);
     attitude_control->set_throttle_out(0.0f, false, copter.g.throttle_filt);
-#else
-    motors->set_desired_spool_state(AP_Motors::DESIRED_SPIN_WHEN_ARMED);
-    // multicopters do not stabilize roll/pitch/yaw when disarmed
-    attitude_control->set_throttle_out_unstabilized(0.0f, true, copter.g.throttle_filt);
-#endif
 }
 
+void Copter::Mode::make_safe_shut_down()
+{
+    // command aircraft to initiate the shutdown process
+    motors->set_desired_spool_state(AP_Motors::DESIRED_SHUT_DOWN);
+    switch (motors->get_spool_mode()) {
+
+    case AP_Motors::SHUT_DOWN:
+    case AP_Motors::GROUND_IDLE:
+        // relax controllers during idle states
+        attitude_control->reset_rate_controller_I_terms();
+        attitude_control->set_yaw_target_to_current_heading();
+        break;
+
+    default:
+        // while transitioning though active states continue to operate normally
+        break;
+    }
+
+    // we may need to move this out
+    wp_nav->wp_and_spline_init();
+    // we may need to move this out
+    loiter_nav->init_target();
+    pos_control->relax_alt_hold_controllers(0.0f);   // forces throttle output to go to zero
+    pos_control->update_z_controller();
+    // we may need to move this out
+    attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(0.0f, 0.0f, 0.0f);
+}
+
+void Copter::Mode::zero_throttle_and_hold_attitude()
+{
+    // run attitude controller
+    attitude_control->input_rate_bf_roll_pitch_yaw(0.0f, 0.0f, 0.0f);
+    attitude_control->set_throttle_out(0.0f, false, copter.g.throttle_filt);
+}
 /*
   get a height above ground estimate for landing
  */
@@ -542,6 +544,76 @@ void Copter::Mode::land_run_horizontal_control()
 
     // call attitude controller
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(nav_roll, nav_pitch, target_yaw_rate);
+}
+
+Copter::Mode::AltHoldModeState Copter::Mode::get_alt_hold_state(float target_climb_rate_cms)
+{
+    // Alt Hold State Machine Determination
+    if (!motors->armed()) {
+        // the aircraft should moved to a shut down state
+        motors->set_desired_spool_state(AP_Motors::DESIRED_SHUT_DOWN);
+
+        // transition through states as aircraft spools down
+        switch (motors->get_spool_mode()) {
+
+        case AP_Motors::SHUT_DOWN:
+            return AltHold_MotorStopped;
+
+        case AP_Motors::DESIRED_GROUND_IDLE:
+            return AltHold_Landed_Ground_Idle;
+
+        default:
+            return AltHold_Landed_Pre_Takeoff;
+        }
+
+    } else if (takeoff.running() || takeoff.triggered(target_climb_rate_cms)) {
+        // the aircraft is currently landed or taking off, asking for a positive climb rate and in THROTTLE_UNLIMITED
+        // the aircraft should progress through the take off procedure
+        return AltHold_Takeoff;
+
+    } else if (!ap.auto_armed || ap.land_complete) {
+        // the aircraft is armed and landed
+        if (target_climb_rate_cms < 0.0f && !ap.using_interlock) {
+            // the aircraft should move to a ground idle state
+            motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
+
+        } else {
+            // the aircraft should prepare for imminent take off
+            motors->set_desired_spool_state(AP_Motors::DESIRED_THROTTLE_UNLIMITED);
+        }
+
+        if (motors->get_spool_mode() == AP_Motors::GROUND_IDLE) {
+            // the aircraft is waiting in ground idle
+            return AltHold_Landed_Ground_Idle;
+
+        } else {
+            // the aircraft can leave the ground at any time
+            return AltHold_Landed_Pre_Takeoff;
+        }
+
+    } else {
+        // the aircraft is in a flying state
+        motors->set_desired_spool_state(AP_Motors::DESIRED_THROTTLE_UNLIMITED);
+        return AltHold_Flying;
+    }
+}
+
+bool Copter::Mode::_TakeOff::triggered(const float target_climb_rate_cms) const
+{
+    if (!copter.ap.land_complete) {
+        // can't take off if we're already flying
+        return false;
+    }
+    if (target_climb_rate_cms <= 0.0f) {
+        // can't takeoff unless we want to go up...
+        return false;
+    }
+    if (copter.motors->get_spool_mode() != AP_Motors::THROTTLE_UNLIMITED) {
+        // hold aircraft on the ground until rotor speed runup has finished
+        return false;
+    }
+
+    return true;
 }
 
 // pass-through functions to reduce code churn on conversion;

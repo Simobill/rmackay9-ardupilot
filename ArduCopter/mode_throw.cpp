@@ -35,7 +35,7 @@ void Copter::ModeThrow::run()
     */
 
     // Don't enter THROW mode if interlock will prevent motors running
-    if (!motors->armed() && motors->get_interlock()) {
+    if (!motors->armed()) {
         // state machine entry is always from a disarmed state
         stage = Throw_Disarmed;
 
@@ -110,26 +110,26 @@ void Copter::ModeThrow::run()
 
         // prevent motors from rotating before the throw is detected unless enabled by the user
         if (g.throw_motor_start == 1) {
-            motors->set_desired_spool_state(AP_Motors::DESIRED_SPIN_WHEN_ARMED);
+            motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
         } else {
             motors->set_desired_spool_state(AP_Motors::DESIRED_SHUT_DOWN);
         }
 
         // demand zero throttle (motors will be stopped anyway) and continually reset the attitude controller
-        attitude_control->set_throttle_out_unstabilized(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(0,true,g.throttle_filt);
         break;
 
     case Throw_Detecting:
 
         // prevent motors from rotating before the throw is detected unless enabled by the user
         if (g.throw_motor_start == 1) {
-            motors->set_desired_spool_state(AP_Motors::DESIRED_SPIN_WHEN_ARMED);
+            motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
         } else {
             motors->set_desired_spool_state(AP_Motors::DESIRED_SHUT_DOWN);
         }
 
         // Hold throttle at zero during the throw and continually reset the attitude controller
-        attitude_control->set_throttle_out_unstabilized(0,true,g.throttle_filt);
+        attitude_control->set_throttle_out(0,true,g.throttle_filt);
 
         // Play the waiting for throw tone sequence to alert the user
         AP_Notify::flags.waiting_for_throw = true;

@@ -41,16 +41,6 @@ void Copter::ModeBrake::run()
         return;
     }
 
-
-    // if landed, spool down motors and disarm
-    if (ap.land_complete) {
-        zero_throttle_and_hold_attitude();
-        wp_nav->init_brake_target(BRAKE_MODE_DECEL_RATE);
-        pos_control->relax_alt_hold_controllers(0.0f);
-        motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
-        return;
-    }
-
     // set motors to full range
     motors->set_desired_spool_state(AP_Motors::DESIRED_THROTTLE_UNLIMITED);
 

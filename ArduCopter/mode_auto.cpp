@@ -800,6 +800,12 @@ void Copter::ModeAuto::spline_run()
 //      called by auto_run at 100hz or more
 void Copter::ModeAuto::land_run()
 {
+    // TODO: this needs fixing because it will not spool down motors
+    // disarm when the landing detector says we've landed
+    if (ap.land_complete) {
+        copter.init_disarm_motors();
+    }
+
     // if not armed set throttle to zero and exit immediately
     // todo: this code is used in multiple places
     if (!motors->armed() || !ap.auto_armed || ap.land_complete) {

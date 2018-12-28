@@ -730,11 +730,10 @@ void QuadPlane::hold_stabilize(float throttle_in)
 
     if (throttle_in <= 0) {
         motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
-        if (is_tailsitter()) {
+        attitude_control->set_throttle_out(0, true, 0);
+        if (!is_tailsitter()) {
             // always stabilize with tailsitters so we can do belly takeoffs
-            attitude_control->set_throttle_out(0, true, 0);
-        } else {
-            attitude_control->set_throttle_out_unstabilized(0, true, 0);
+            attitude_control->relax_attitude_controllers();
         }
     } else {
         motors->set_desired_spool_state(AP_Motors::DESIRED_THROTTLE_UNLIMITED);
@@ -855,7 +854,8 @@ void QuadPlane::control_hover(void)
 {
     if (throttle_wait) {
         motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
-        attitude_control->set_throttle_out_unstabilized(0, true, 0);
+        attitude_control->set_throttle_out(0, true, 0);
+        attitude_control->relax_attitude_controllers();
         pos_control->relax_alt_hold_controllers(0);
     } else {
         hold_hover(get_pilot_desired_climb_rate_cms());
@@ -974,7 +974,8 @@ void QuadPlane::control_loiter()
 {
     if (throttle_wait) {
         motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
-        attitude_control->set_throttle_out_unstabilized(0, true, 0);
+        attitude_control->set_throttle_out(0, true, 0);
+        attitude_control->relax_attitude_controllers();
         pos_control->relax_alt_hold_controllers(0);
         loiter_nav->clear_pilot_desired_acceleration();
         loiter_nav->init_target();

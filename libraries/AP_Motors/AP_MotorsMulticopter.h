@@ -10,7 +10,7 @@
 
 #define AP_MOTORS_DEFAULT_MID_THROTTLE  500
 
-#define AP_MOTORS_SPIN_WHEN_ARMED       70      // spin motors at this PWM value when armed
+#define AP_MOTORS_GROUND_IDLE           70      // spin motors at this PWM value when armed
 #define AP_MOTORS_YAW_HEADROOM_DEFAULT  200
 #define AP_MOTORS_THST_EXPO_DEFAULT     0.65f   // set to 0 for linear and 1 for second order approximation
 #define AP_MOTORS_THST_HOVER_DEFAULT    0.35f   // the estimated hover throttle, 0 ~ 1
@@ -52,15 +52,6 @@ public:
     // update estimated throttle required to hover
     void                update_throttle_hover(float dt);
     virtual float       get_throttle_hover() const override { return _throttle_hover; }
-
-    // spool up states
-    enum spool_up_down_mode {
-        SHUT_DOWN = 0,                      // all motors stop
-        SPIN_WHEN_ARMED = 1,                // all motors at spin when armed
-        SPOOL_UP = 2,                       // increasing maximum throttle while stabilizing
-        THROTTLE_UNLIMITED = 3,             // throttle is no longer constrained by start up procedure
-        SPOOL_DOWN = 4,                     // decreasing maximum throttle while stabilizing
-    };
 
     // passes throttle directly to all motors for ESC calibration.
     //   throttle_input is in the range of 0 ~ 1 where 0 will send get_pwm_output_min() and 1 will send get_pwm_output_max()
@@ -180,7 +171,6 @@ protected:
     int16_t             _throttle_radio_max;        // maximum PWM from RC input's throttle channel (i.e. maximum PWM input from receiver, RC3_MAX)
 
     // spool variables
-    spool_up_down_mode  _spool_mode;         // motor's current spool mode
     float               _spin_up_ratio;      // throttle percentage (0 ~ 1) between zero and throttle_min
 
     // battery voltage, current and air pressure compensation variables

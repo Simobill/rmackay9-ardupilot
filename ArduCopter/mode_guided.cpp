@@ -430,17 +430,6 @@ void Copter::ModeGuided::pos_control_run()
         return;
     }
 
-    // if landed, spool down motors and disarm
-    if (ap.land_complete) {
-        zero_throttle_and_hold_attitude();
-        pos_control->relax_alt_hold_controllers(0.0f);
-        motors->set_desired_spool_state(AP_Motors::DESIRED_GROUND_IDLE);
-        if (motors->get_spool_mode() == AP_Motors::GROUND_IDLE) {
-            copter.init_disarm_motors();
-        }
-        return;
-    }
-
     // set motors to full range
     motors->set_desired_spool_state(AP_Motors::DESIRED_THROTTLE_UNLIMITED);
 
@@ -623,6 +612,7 @@ void Copter::ModeGuided::angle_control_run()
         return;
     }
 
+    // TODO: use get_alt_hold_state
     // landed with positive desired climb rate, takeoff
     if (ap.land_complete && (guided_angle_state.climb_rate_cms > 0.0f)) {
         zero_throttle_and_relax_ac();

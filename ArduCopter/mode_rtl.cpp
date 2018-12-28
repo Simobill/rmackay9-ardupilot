@@ -354,6 +354,13 @@ bool Copter::ModeRTL::landing_gear_should_be_deployed() const
 //      called by rtl_run at 100hz or more
 void Copter::ModeRTL::land_run(bool disarm_on_land)
 {
+
+    // TODO: this needs fixing because it will not spool down motors
+    // disarm when the landing detector says we've landed
+    if (disarm_on_land && ap.land_complete) {
+        copter.init_disarm_motors();
+    }
+
     // if not armed set throttle to zero and exit immediately
     // todo: this code is used in multiple places
     if (!motors->armed() || !ap.auto_armed || ap.land_complete) {

@@ -354,6 +354,8 @@ bool Copter::ModeRTL::landing_gear_should_be_deployed() const
 //      called by rtl_run at 100hz or more
 void Copter::ModeRTL::land_run(bool disarm_on_land)
 {
+    // check if we've completed this stage of RTL
+    _state_complete = ap.land_complete;
 
     // TODO: this needs fixing because it will not spool down motors
     // disarm when the landing detector says we've landed

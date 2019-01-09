@@ -50,7 +50,7 @@ const AP_Param::GroupInfo AP_BoardConfig_CAN::Driver::var_info[] = {
 #endif
 
     // @Group: TC_
-    // @Path: ../AP_KDECAN/AP_ToshibaCAN.cpp
+    // @Path: ../AP_ToshibaCAN/AP_ToshibaCAN.cpp
     AP_SUBGROUPPTR(_tcan, "TC_", 4, AP_BoardConfig_CAN::Driver, AP_ToshibaCAN),
 
     AP_GROUPEND

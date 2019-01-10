@@ -123,7 +123,7 @@ void AP_ToshibaCAN::loop()
 
     const uint32_t loop_interval_us = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
 
-    static uint8_t stage = 2;  // 0 = locking, 1 = unlocking, 2 = sending motor updates
+    static uint8_t stage = 1;  // 0 = locking, 1 = unlocking, 2 = sending motor updates
 
     while (true) {
         if (!_initialized) {
@@ -170,7 +170,7 @@ void AP_ToshibaCAN::loop()
                 // success
                 gcs().send_text(MAV_SEVERITY_CRITICAL,"lok!");
                 // move to next stage
-                //stage = 1;
+                stage = 1;
             } else if (res == 0) {
                 gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
                 continue;
@@ -183,8 +183,8 @@ void AP_ToshibaCAN::loop()
         // unlock motors
         if (stage == 1) {
             // prepare message to unlock motors
-            //motor_lock_cmd_t unlock_cmd = {{1,1,1,1,1,1,1,1,1,1,1,1}};
-            motor_lock_cmd_t unlock_cmd = {{1,0,0,0,0,0,0,0,0,0,0,0}};
+            motor_lock_cmd_t unlock_cmd = {{1,1,1,1,1,1,1,1,1,1,1,1}};
+            //motor_lock_cmd_t unlock_cmd = {{1,0,0,0,0,0,0,0,0,0,0,0}};
             uavcan::CanFrame unlock_frame {(uint8_t)COMMAND_LOCK, unlock_cmd.data, sizeof(unlock_cmd.data)};
 
             // wait for space in buffer to send
@@ -224,7 +224,7 @@ void AP_ToshibaCAN::loop()
         if (stage == 2) {
             // prepare message to spin motors
             motor_rotation_cmd_t mot_rot_cmd; // = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
-            mot_rot_cmd.motor1 = htobe16((uint16_t)0);
+            mot_rot_cmd.motor1 = htobe16((uint16_t)6400);
             mot_rot_cmd.motor2 = htobe16((uint16_t)0);
             mot_rot_cmd.motor3 = htobe16((uint16_t)0);
             mot_rot_cmd.motor4 = htobe16((uint16_t)0);

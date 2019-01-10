@@ -123,7 +123,7 @@ void AP_ToshibaCAN::loop()
 
     const uint32_t loop_interval_us = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
 
-    static uint8_t stage = 0;  // 0 = locking, 1 = unlocking, 2 = sending motor updates
+    static uint8_t stage = 2;  // 0 = locking, 1 = unlocking, 2 = sending motor updates
 
     while (true) {
         if (!_initialized) {
@@ -224,7 +224,7 @@ void AP_ToshibaCAN::loop()
         if (stage == 2) {
             // prepare message to spin motors
             motor_rotation_cmd_t mot_rot_cmd; // = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
-            mot_rot_cmd.motor1 = htobe16((uint16_t)6300);
+            mot_rot_cmd.motor1 = htobe16((uint16_t)0);
             mot_rot_cmd.motor2 = htobe16((uint16_t)0);
             mot_rot_cmd.motor3 = htobe16((uint16_t)0);
             mot_rot_cmd.motor4 = htobe16((uint16_t)0);

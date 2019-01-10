@@ -43,6 +43,9 @@ extern const AP_HAL::HAL& hal;
 
 #define DEFAULT_NUM_POLES 14
 
+#define TOSHIBACAN_OUTPUT_MIN 6300
+#define TOSHIBACAN_OUTPUT_MAX 32000
+
 // table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_ToshibaCAN::var_info[] = {
     // @Param: NPOLE
@@ -123,8 +126,6 @@ void AP_ToshibaCAN::loop()
 
     const uint32_t loop_interval_us = MIN(AP::scheduler().get_loop_period_us(), SET_PWM_MIN_INTERVAL_US);
 
-    static uint8_t stage = 1;  // 0 = locking, 1 = unlocking, 2 = sending motor updates
-
     while (true) {
         if (!_initialized) {
             // if not initialised wait 2ms
@@ -140,248 +141,91 @@ void AP_ToshibaCAN::loop()
             continue;
         }
 
-        // lock motors
-        if (stage == 0) {
-            // prepare message to LOCK motors
-            motor_lock_cmd_t lock_cmd = {{2,2,2,2,2,2,2,2,2,2,2,2}};
-            //motor_lock_cmd_t lock_cmd = {{2,0,0,0,0,0,0,0,0,0,0,0}};
-            uavcan::CanFrame lock_frame {(uint8_t)COMMAND_LOCK, lock_cmd.data, sizeof(lock_cmd.data)};
+        // prepare message to lock or unlock motors
+        motor_lock_cmd_t unlock_cmd = {};
+        unlock_cmd.motor1 = _scaled_output[0] == 0 ? 2 : 1;
+        unlock_cmd.motor2 = _scaled_output[1] == 0 ? 2 : 1;
+        unlock_cmd.motor3 = _scaled_output[2] == 0 ? 2 : 1;
+        unlock_cmd.motor4 = _scaled_output[3] == 0 ? 2 : 1;
+        uavcan::CanFrame unlock_frame {(uint8_t)COMMAND_LOCK, unlock_cmd.data, sizeof(unlock_cmd.data)};
 
-            // wait for space in buffer to send
-            uint64_t now = AP_HAL::micros64();
-            uavcan::CanSelectMasks inout_mask;
-            inout_mask.write = 1 << CAN_IFACE_INDEX;
-            select_frames[CAN_IFACE_INDEX] = &lock_frame;
-            timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
-            _can_driver->select(inout_mask, select_frames, timeout);
+        // wait for space in buffer to send
+        uint32_t now = AP_HAL::micros64();
+        uavcan::CanSelectMasks lock_inout_mask;
+        lock_inout_mask.write = 1 << CAN_IFACE_INDEX;
+        select_frames[CAN_IFACE_INDEX] = &unlock_frame;
+        timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
+        _can_driver->select(lock_inout_mask, select_frames, timeout);
 
-            // double check space to send is available
-            if (!inout_mask.write) {
-                continue;
-            }
-
-            // send lock command
-            now = AP_HAL::micros64();
-            timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
-            int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(lock_frame, timeout, 0);
-
-            // check results
-            if (res == 1) {
-                // success
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"lok!");
-                // move to next stage
-                stage = 1;
-            } else if (res == 0) {
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
-                continue;
-            } else {
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"f1!");
-                continue;
-            }
+        // double check space to send is available
+        if (!lock_inout_mask.write) {
+            continue;
         }
 
-        // unlock motors
-        if (stage == 1) {
-            // prepare message to unlock motors
-            motor_lock_cmd_t unlock_cmd = {{1,1,1,1,1,1,1,1,1,1,1,1}};
-            //motor_lock_cmd_t unlock_cmd = {{1,0,0,0,0,0,0,0,0,0,0,0}};
-            uavcan::CanFrame unlock_frame {(uint8_t)COMMAND_LOCK, unlock_cmd.data, sizeof(unlock_cmd.data)};
+        // send unlock command
+        now = AP_HAL::micros64();
+        timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
+        int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(unlock_frame, timeout, 0);
 
-            // wait for space in buffer to send
-            uint32_t now = AP_HAL::micros64();
-            uavcan::CanSelectMasks inout_mask;
-            inout_mask.write = 1 << CAN_IFACE_INDEX;
-            select_frames[CAN_IFACE_INDEX] = &unlock_frame;
-            timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
-            _can_driver->select(inout_mask, select_frames, timeout);
-
-            // double check space to send is available
-            if (!inout_mask.write) {
-                continue;
-            }
-
-            // send unlock command
-            now = AP_HAL::micros64();
-            timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
-            int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(unlock_frame, timeout, 0);
-
-            // check results
-            if (res == 1) {
-                // success
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"ulok!");
-                // move to next stage
-                stage = 2;
-            } else if (res == 0) {
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"f2!");
-                continue;
-            } else {
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"f3!");
-                continue;
-            }
+        // check results
+        if (res != 1) {
+            // skip updating output to motors
+            continue;
         }
 
-        // send motor commands
-        if (stage == 2) {
-            // prepare message to spin motors
-            motor_rotation_cmd_t mot_rot_cmd; // = {{.motor1 = 6300, .motor2 = 6300, .motor3 = 6300, .motor4 = 6300}};
-            mot_rot_cmd.motor1 = htobe16((uint16_t)6400);
-            mot_rot_cmd.motor2 = htobe16((uint16_t)0);
-            mot_rot_cmd.motor3 = htobe16((uint16_t)0);
-            mot_rot_cmd.motor4 = htobe16((uint16_t)0);
+        // prepare message to spin motors
+        motor_rotation_cmd_t mot_rot_cmd;
+        mot_rot_cmd.motor1 = htobe16(_scaled_output[0]);
+        mot_rot_cmd.motor2 = htobe16(_scaled_output[1]);
+        mot_rot_cmd.motor3 = htobe16(_scaled_output[2]);
+        mot_rot_cmd.motor4 = htobe16(_scaled_output[3]);
+        uavcan::CanFrame mot_rot_frame {((uint8_t)COMMAND_MOTOR1 & uavcan::CanFrame::MaskStdID), mot_rot_cmd.data, sizeof(mot_rot_cmd.data)};
 
-            uavcan::CanFrame mot_rot_frame {((uint8_t)COMMAND_MOTOR1 & uavcan::CanFrame::MaskStdID), mot_rot_cmd.data, sizeof(mot_rot_cmd.data)};
+        // wait for space in buffer to send
+        now = AP_HAL::micros64();
+        uavcan::CanSelectMasks mot_inout_mask;
+        mot_inout_mask.write = 1 << CAN_IFACE_INDEX;
+        select_frames[CAN_IFACE_INDEX] = &mot_rot_frame;
+        timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
+        _can_driver->select(mot_inout_mask, select_frames, timeout);
 
-            // wait for space in buffer to send
-            uint32_t now = AP_HAL::micros64();
-            uavcan::CanSelectMasks inout_mask;
-            inout_mask.write = 1 << CAN_IFACE_INDEX;
-            select_frames[CAN_IFACE_INDEX] = &mot_rot_frame;
-            timeout = uavcan::MonotonicTime::fromUSec(now + loop_interval_us);
-            _can_driver->select(inout_mask, select_frames, timeout);
-
-            // double check space to send is available
-            if (!inout_mask.write) {
-                continue;
-            }
-
-            // send motor rotation command
-            now = AP_HAL::micros64();
-            timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
-            int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(mot_rot_frame, timeout, 0);
-
-            // check results
-            if (res == 1) {
-                // success
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"mok!");
-            } else if (res == 0) {
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"m1!");
-                continue;
-            } else {
-                gcs().send_text(MAV_SEVERITY_CRITICAL,"m1!");
-                continue;
-            }
+        // double check space to send is available
+        if (!mot_inout_mask.write) {
+            continue;
         }
 
-        /*id.id2 = COMMAND_MOTOR1;
+        // send motor rotation command
+        now = AP_HAL::micros64();
+        timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
+        res = _can_driver->getIface(CAN_IFACE_INDEX)->send(mot_rot_frame, timeout, 0);
 
-        frame = { (id.value | uavcan::CanFrame::MaskStdID), mot_rot_data.data, ARRAY_SIZE(mot_rot_data.data) };
-        select_frames[CAN_IFACE_INDEX] = &frame;
-        _can_driver->select(inout_mask, select_frames, timeout);
-        */
-
-        /*
-        frame_id_t id = { { .object_address = ENUM_OBJ_ADDR,
-                          .destination_id = BROADCAST_NODE_ID,
-                          .source_id = AUTOPILOT_NODE_ID,
-                          .priority = 0,
-                          .unused = 0 } };
-        be16_t data = htobe16((uint16_t) ENUMERATION_TIMEOUT_MS);
-        uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &data, sizeof(data) };
-
-        uavcan::CanSelectMasks in_mask = inout_mask;
-        select_frames[CAN_IFACE_INDEX] = &frame;
-
-        _can_driver->select(inout_mask, select_frames, timeout);
-        */
-
-/*
-        return;
-
-        //uavcan::CanSelectMasks in_mask = inout_mask;
-        _can_driver->select(inout_mask, select_frames, timeout);
-
-        //return;
-
-        if (in_mask.write & inout_mask.write) {
-            bool new_output = _new_output.load(std::memory_order_acquire);
-
-            // check for timeout sending to ESC
-            now = AP_HAL::micros64();
-            if (sending_esc_num > 0) {
-                if ((now - pwm_last_sent) > SET_PWM_TIMEOUT_US) {
-                    debug_can(2, "ToshibaCAN: timed-out after sending frame to ESC with ID %d\n\r", sending_esc_num - 1);
-                    sending_esc_num = 0;
-                }
-            }
-
-            // copy desired pwm outputs to output_buffer
-            if (sending_esc_num == 0 && new_output) {
-                if (!_rc_out_sem.take(1)) {
-                    debug_can(2, "ToshibaCAN: failed to get PWM semaphore on read\n\r");
-                    continue;
-                }
-                memcpy(output_buffer, _scaled_output, TOSHIBACAN_MAX_NUM_ESCS * sizeof(uint16_t));
-                _rc_out_sem.give();
-            }
-
-            if ((sending_esc_num > 0) ||
-                (new_output && (pwm_last_sent == 0 || (now - pwm_last_sent > SET_PWM_TIMEOUT_US))) ||
-                ((pwm_last_sent != 0) && (now - pwm_last_sent > SET_PWM_MIN_INTERVAL_US))) {
-
-                for (uint8_t esc_num = sending_esc_num; esc_num < _esc_max_node_id; esc_num++) {
-
-                    if ((_esc_present_bitmask & (1 << esc_num)) == 0) {
-                        continue;
-                    }
-
-                    be16_t tcan_pwm = htobe16(output_buffer[esc_num]);
-
-                    frame_id_t id = { { .object_address = SET_PWM_OBJ_ADDR,
-                                      .destination_id = uint8_t(esc_num + ESC_NODE_ID_FIRST),
-                                      .source_id = AUTOPILOT_NODE_ID,
-                                      .priority = 0,
-                                      .unused = 0 } };
-
-                    uavcan::CanFrame frame { (id.value | uavcan::CanFrame::FlagEFF), (uint8_t*) &tcan_pwm, sizeof(tcan_pwm) };
-
-                    if (esc_num == 0) {
-                        timeout = uavcan::MonotonicTime::fromUSec(now + SET_PWM_TIMEOUT_US);
-                    } else {
-                        timeout = uavcan::MonotonicTime::fromUSec(pwm_last_sent + SET_PWM_TIMEOUT_US);
-                    }
-
-                    // send frame to ESCs
-                    int8_t res = _can_driver->getIface(CAN_IFACE_INDEX)->send(frame, timeout, 0);
-
-                    // check if send was successful
-                    if (res == 1) {
-                        if (esc_num == 0) {
-                            pwm_last_sent = now;
-
-                            if (new_output) {
-                                _new_output.store(false, std::memory_order_release);
-                            }
-                        }
-
-                        sending_esc_num = (esc_num + 1) % _esc_max_node_id;
-                    } else if (res == 0) {
-                        debug_can(1, "ToshibaCAN: strange buffer full when sending message to ESC with ID %d\n\r", esc_num + ESC_NODE_ID_FIRST);
-                    } else {
-                        debug_can(1, "ToshibaCAN: error sending message to ESC with ID %d, result %d\n\r", esc_num + ESC_NODE_ID_FIRST, res);
-                    }
-
-                    break;
-                }
-            }
+        // check results
+        if (res != 1) {
+            // ignore failures
         }
-    */
     }
 }
 
 // called from SRV_Channels
 void AP_ToshibaCAN::update()
 {
+    uint16_t pwm1 = 0;
     if (_rc_out_sem.take(1)) {
         for (uint8_t i = 0; i < TOSHIBACAN_MAX_NUM_ESCS; i++) {
-            if ((_esc_present_bitmask & (1 << i)) == 0) {
-                continue;
-            }
-
             SRV_Channel::Aux_servo_function_t motor_function = SRV_Channels::get_motor_function(i);
 
-            if (SRV_Channels::function_assigned(motor_function)) {
-                float norm_output = SRV_Channels::get_output_norm(motor_function);
-                _scaled_output[i] = uint16_t((norm_output + 1.0f) / 2.0f * 2000.0f);
+            uint16_t pwm_out;
+            if (SRV_Channels::get_output_pwm(motor_function, pwm_out)) {
+                if (i == 0) {
+                    pwm1 = pwm_out;
+                }
+                if (pwm_out <= 1000) {
+                    _scaled_output[i] = 0;
+                } else if (pwm_out >= 2000) {
+                    _scaled_output[i] = TOSHIBACAN_OUTPUT_MAX;
+                } else {
+                    _scaled_output[i] = TOSHIBACAN_OUTPUT_MIN + (pwm_out - 1000) * 0.001f * (TOSHIBACAN_OUTPUT_MAX - TOSHIBACAN_OUTPUT_MIN);
+                }
             } else {
                 _scaled_output[i] = 0;
             }
@@ -391,6 +235,12 @@ void AP_ToshibaCAN::update()
         _new_output.store(true, std::memory_order_release);
     } else {
         debug_can(2, "ToshibaCAN: failed to get PWM semaphore on write\n\r");
+    }
+    static uint16_t counter = 0;
+    counter++;
+    if (counter > 400) {
+        counter = 0;
+        gcs().send_text(MAV_SEVERITY_CRITICAL,"pwm1:%u ch1:%u", (unsigned)pwm1, (unsigned)_scaled_output[0]);
     }
 }
 

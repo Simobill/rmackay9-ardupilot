@@ -71,14 +71,14 @@ private:
             uint8_t motor1:4;
             uint8_t motor4:4;
             uint8_t motor3:4;
-            uint8_t motor5:4;
             uint8_t motor6:4;
-            uint8_t motor7:4;
+            uint8_t motor5:4;
             uint8_t motor8:4;
-            uint8_t motor9:4;
+            uint8_t motor7:4;
             uint8_t motor10:4;
-            uint8_t motor11:4;
+            uint8_t motor9:4;
             uint8_t motor12:4;
+            uint8_t motor11:4;
         };
         uint8_t data[6];
     };

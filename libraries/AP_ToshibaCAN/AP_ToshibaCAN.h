@@ -67,18 +67,18 @@ private:
     // structure for sending motor lock command to ESC
     union motor_lock_cmd_t {
         struct PACKED {
-            int8_t motor1:4;
-            int8_t motor2:4;
-            int8_t motor3:4;
-            int8_t motor4:4;
-            int8_t motor5:4;
-            int8_t motor6:4;
-            int8_t motor7:4;
-            int8_t motor8:4;
-            int8_t motor9:4;
-            int8_t motor10:4;
-            int8_t motor11:4;
-            int8_t motor12:4;
+            uint8_t motor2:4;
+            uint8_t motor1:4;
+            uint8_t motor4:4;
+            uint8_t motor3:4;
+            uint8_t motor5:4;
+            uint8_t motor6:4;
+            uint8_t motor7:4;
+            uint8_t motor8:4;
+            uint8_t motor9:4;
+            uint8_t motor10:4;
+            uint8_t motor11:4;
+            uint8_t motor12:4;
         };
         uint8_t data[6];
     };
@@ -86,10 +86,10 @@ private:
     // structure for sending turn rate command to ESC
     union motor_rotation_cmd_t {
         struct PACKED {
-            int16_t motor4;
-            int16_t motor3;
-            int16_t motor2;
-            int16_t motor1;
+            uint16_t motor4;
+            uint16_t motor3;
+            uint16_t motor2;
+            uint16_t motor1;
         };
         uint8_t data[8];
     };

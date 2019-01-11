@@ -143,10 +143,10 @@ void AP_ToshibaCAN::loop()
 
         // prepare message to lock or unlock motors
         motor_lock_cmd_t unlock_cmd = {};
-        unlock_cmd.motor1 = _scaled_output[0] == 0 ? 2 : 1;
-        unlock_cmd.motor2 = _scaled_output[1] == 0 ? 2 : 1;
-        unlock_cmd.motor3 = _scaled_output[2] == 0 ? 2 : 1;
-        unlock_cmd.motor4 = _scaled_output[3] == 0 ? 2 : 1;
+        unlock_cmd.motor1 = (_scaled_output[0] == 0) ? 2 : 1;
+        unlock_cmd.motor2 = (_scaled_output[1] == 0) ? 2 : 1;
+        unlock_cmd.motor3 = (_scaled_output[2] == 0) ? 2 : 1;
+        unlock_cmd.motor4 = (_scaled_output[3] == 0) ? 2 : 1;
         uavcan::CanFrame unlock_frame {(uint8_t)COMMAND_LOCK, unlock_cmd.data, sizeof(unlock_cmd.data)};
 
         // wait for space in buffer to send
@@ -210,6 +210,7 @@ void AP_ToshibaCAN::loop()
 void AP_ToshibaCAN::update()
 {
     uint16_t pwm1 = 0;
+    uint16_t pwm2 = 0;
     if (_rc_out_sem.take(1)) {
         for (uint8_t i = 0; i < TOSHIBACAN_MAX_NUM_ESCS; i++) {
             SRV_Channel::Aux_servo_function_t motor_function = SRV_Channels::get_motor_function(i);
@@ -218,6 +219,9 @@ void AP_ToshibaCAN::update()
             if (SRV_Channels::get_output_pwm(motor_function, pwm_out)) {
                 if (i == 0) {
                     pwm1 = pwm_out;
+                }
+                if (i == 1) {
+                    pwm2 = pwm_out;
                 }
                 if (pwm_out <= 1000) {
                     _scaled_output[i] = 0;
@@ -240,7 +244,10 @@ void AP_ToshibaCAN::update()
     counter++;
     if (counter > 400) {
         counter = 0;
-        gcs().send_text(MAV_SEVERITY_CRITICAL,"pwm1:%u ch1:%u", (unsigned)pwm1, (unsigned)_scaled_output[0]);
+        gcs().send_text(MAV_SEVERITY_CRITICAL,"1:%u/%u 2:%u/%u",
+                        (unsigned)pwm1, (unsigned)_scaled_output[0],
+                        (unsigned)pwm2, (unsigned)_scaled_output[1]
+                       );
     }
 }
 

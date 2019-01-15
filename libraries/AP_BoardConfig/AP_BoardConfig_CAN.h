@@ -120,6 +120,7 @@ private:
         AP_Int8 _protocol_type;
         Protocol_Type _protocol_type_cache;
         AP_HAL::CANProtocol* _driver;
+        AP_HAL::CANProtocol* _uavcan;
     };
 
     Interface _interfaces[MAX_NUMBER_OF_CAN_INTERFACES];

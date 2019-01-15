@@ -31,7 +31,7 @@ const AP_Param::GroupInfo AP_BoardConfig_CAN::Driver::var_info[] = {
 
     // @Group: UC_
     // @Path: ../AP_UAVCAN/AP_UAVCAN.cpp
-    AP_SUBGROUPPTR(_driver, "UC_", 2, AP_BoardConfig_CAN::Driver, AP_UAVCAN),
+    AP_SUBGROUPPTR(_uavcan, "UC_", 2, AP_BoardConfig_CAN::Driver, AP_UAVCAN),
 
     AP_GROUPEND
 };
